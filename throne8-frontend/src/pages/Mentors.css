@@ -1,0 +1,512 @@
+.mentors-page {
+  min-height: 100vh;
+  padding: 70px 7% 90px;
+  color: #f4f1eb;
+  background:
+    radial-gradient(
+      ellipse at 85% 10%,
+      #383326 0%,
+      #111210 48%
+    );
+}
+
+.mentors-header {
+  max-width: 760px;
+  margin: 0 auto 48px;
+  text-align: center;
+}
+
+.mentors-header .eyebrow {
+  color: #d7b779;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+}
+
+.mentors-header h1 {
+  margin: 18px 0;
+  color: #f4f1eb;
+  font-family: "Manrope", sans-serif;
+  font-size: clamp(36px, 5vw, 54px);
+  line-height: 1.2;
+  letter-spacing: -1.8px;
+}
+
+.mentors-header > p:last-child {
+  color: #b7b7ae;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.mentors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 340px));
+  justify-content: center;
+  gap: 24px;
+}
+
+.mentor-card {
+  padding: 30px;
+  color: #f4f1eb;
+  background: #1b1c18;
+  border: 1px solid #424033;
+  border-radius: 18px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.mentor-card:hover {
+  transform: translateY(-4px);
+  border-color: #d7b779;
+}
+
+.mentor-avatar {
+  width: 66px;
+  height: 66px;
+  margin-bottom: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #353023;
+  border: 1px solid #65563a;
+  color: #d7b779;
+  font-family: "Manrope", sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.verified-label {
+  display: inline-block;
+  padding: 7px 11px;
+  border: 1px solid #536347;
+  border-radius: 20px;
+  background: #20291e;
+  color: #b6d4a5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mentor-card h2 {
+  margin: 18px 0 7px;
+  color: #f4f1eb;
+  font-family: "Manrope", sans-serif;
+  font-size: 24px;
+}
+
+.mentor-subtitle {
+  margin: 0;
+  color: #aaa99f;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.mentor-card h3 {
+  margin: 27px 0 13px;
+  color: #e7e3d8;
+  font-family: "Manrope", sans-serif;
+  font-size: 15px;
+}
+
+.expertise-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.skill-tag {
+  padding: 8px 11px;
+  border: 1px solid #424033;
+  border-radius: 7px;
+  background: #25251f;
+  color: #d8d3c6;
+  font-size: 13px;
+}
+
+.mentor-price {
+  margin: 28px 0 22px;
+  padding-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #34352e;
+}
+
+.mentor-price span {
+  color: #aaa99f;
+  font-size: 14px;
+}
+
+.mentor-price strong {
+  color: #d7b779;
+  font-family: "Manrope", sans-serif;
+  font-size: 27px;
+}
+
+.book-mentor-btn {
+  width: 100%;
+  min-height: 48px;
+  padding: 13px 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #d7b779;
+  color: #171610;
+  font: inherit;
+  font-weight: 700;
+  transition: 0.2s ease;
+}
+
+.book-mentor-btn:hover {
+  background: #e7ca91;
+  transform: translateY(-1px);
+}
+
+.mentors-page .error-message {
+  color: #ff8585;
+  text-align: center;
+}
+
+.mentors-page > p {
+  color: #b7b7ae;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .mentors-page {
+    padding: 48px 20px 65px;
+  }
+
+  .mentors-header {
+    margin-bottom: 32px;
+  }
+
+  .mentors-header h1 {
+    letter-spacing: -1px;
+  }
+
+  .mentors-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mentor-card {
+    padding: 25px;
+  }
+}
+
+
+/* ===== BOOKING FORM ===== */
+
+.booking-notice {
+  width: min(700px, 100%);
+  margin: 0 auto 30px;
+  padding: 18px 22px;
+  border: 1px solid #536347;
+  border-radius: 12px;
+  background: #20291e;
+  color: #d9e8ce;
+  line-height: 1.7;
+}
+
+.booking-notice p {
+  margin: 4px 0;
+}
+
+.booking-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.booking-modal {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 34px;
+  border: 1px solid #424033;
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      ellipse at top right,
+      #302c21 0%,
+      #1b1c18 48%
+    );
+  color: #f4f1eb;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.booking-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #42433c;
+  border-radius: 8px;
+  background: transparent;
+  color: #f4f1eb;
+  font-size: 25px;
+}
+
+.booking-close:hover {
+  border-color: #d7b779;
+  color: #d7b779;
+}
+
+.booking-modal .eyebrow {
+  color: #d7b779;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+.booking-modal h2 {
+  margin: 14px 0;
+  font-family: "Manrope", sans-serif;
+}
+
+.booking-description,
+.booking-footnote {
+  color: #aaa99f;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.booking-fee {
+  margin: 22px 0;
+  padding: 15px;
+  border: 1px solid #424033;
+  border-radius: 9px;
+  background: #111210;
+  color: #c0c0b8;
+}
+
+.booking-fee strong {
+  color: #d7b779;
+}
+
+.booking-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.booking-form label {
+  margin-top: 5px;
+  color: #e7e3d8;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.booking-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #42433c;
+  border-radius: 8px;
+  outline: none;
+  background: #111210;
+  color: #f4f1eb;
+  color-scheme: dark;
+  font: inherit;
+  font-size: 14px;
+}
+
+.booking-form input:focus {
+  border-color: #d7b779;
+  box-shadow: 0 0 0 3px rgba(215, 183, 121, 0.1);
+}
+
+.booking-error {
+  margin: 4px 0;
+  color: #ff8585;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.booking-form .book-mentor-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.booking-footnote {
+  margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+  .booking-overlay {
+    padding: 14px;
+  }
+
+  .booking-modal {
+    padding: 28px 20px;
+    max-height: calc(100vh - 28px);
+  }
+}
+
+
+.booking-debug {
+  padding: 10px 12px;
+  border: 1px solid #424033;
+  border-radius: 8px;
+  background: #111210;
+  overflow-wrap: anywhere;
+}
+
+.booking-debug p {
+  margin: 4px 0;
+  color: #aaa99f;
+  font-size: 12px;
+}
+
+
+.mentors-page {
+  width: min(1120px, 92%);
+  margin: 0 auto;
+  padding: 48px 0 72px;
+}
+
+.mentors-header {
+  max-width: 720px;
+  margin-bottom: 36px;
+}
+
+.mentors-header h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+}
+
+.eyebrow {
+  color: #d7b779;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.mentor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 22px;
+}
+
+.mentor-card,
+.payment-notice,
+.booking-modal {
+  background: #1a1b18;
+  border: 1px solid #393a32;
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.mentor-card h2,
+.payment-notice h2,
+.booking-modal h2 {
+  margin-top: 8px;
+}
+
+.mentor-expertise {
+  color: #d7b779;
+}
+
+.mentor-price {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.mentor-price span {
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.payment-notice {
+  margin-bottom: 28px;
+}
+
+.payment-notice p {
+  line-height: 1.6;
+}
+
+.mentors-error {
+  color: #ff9b91;
+  margin: 14px 0;
+}
+
+.booking-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgb(0 0 0 / 75%);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.booking-modal {
+  width: min(100%, 460px);
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.booking-modal form {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.booking-modal input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #55564d;
+  border-radius: 8px;
+  background: #111210;
+  color: #f4f1eb;
+  font: inherit;
+}
+
+.booking-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  border: 0;
+  background: transparent;
+  color: #f4f1eb;
+  font-size: 1.8rem;
+  cursor: pointer;
+}
+
+.booking-modal .btn,
+.payment-notice .btn {
+  margin-top: 12px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .mentors-page {
+    padding-top: 28px;
+  }
+
+  .mentor-card,
+  .payment-notice,
+  .booking-modal {
+    padding: 18px;
+  }
+}
+
