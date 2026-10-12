@@ -209,7 +209,90 @@ if (expiredBookings.length > 0) {
   }
 };
 
+
+// COMPLETE A MENTOR SESSION
+const completeMentorBooking = async (req, res) => {
+  try {
+    // Only mentors can complete sessions
+    if (req.user.role !== "mentor") {
+      return res.status(403).json({
+        success: false,
+        message: "Only mentors can complete sessions",
+      });
+    }
+
+    const { bookingId } = req.params;
+
+    if (!bookingId || !/^[0-9a-fA-F]{24}$/.test(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    // Find the logged-in mentor's profile
+    const mentor = await Mentor.findOne({
+      userId: req.user.id,
+    });
+
+    if (!mentor) {
+      return res.status(404).json({
+        success: false,
+        message: "Mentor profile not found",
+      });
+    }
+
+    // Only this mentor's confirmed booking can be completed
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      mentorId: mentor._id,
+      status: "CONFIRMED",
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Confirmed booking not found for this mentor",
+      });
+    }
+
+    // Prevent completion before the session has ended
+    if (new Date() < booking.slotEnd) {
+      return res.status(400).json({
+        success: false,
+        message: "The session has not ended yet",
+      });
+    }
+
+    booking.status = "COMPLETED";
+    booking.completedAt = new Date();
+
+    // Make payout eligible after session completion
+    booking.payoutEligibleAt = new Date(
+      booking.completedAt.getTime() + 24 * 60 * 60 * 1000
+    );
+
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Mentor session completed successfully",
+      booking,
+    });
+  } catch (error) {
+    console.error("Complete mentor booking error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to complete mentor session",
+    });
+  }
+};
+
+
 module.exports = {
   createBooking,
   getMyBookings,
+  completeMentorBooking,
 };

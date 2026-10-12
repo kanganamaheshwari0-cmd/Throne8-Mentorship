@@ -1,5 +1,6 @@
 
 const Mentor = require("../models/Mentor");
+const Booking = require("../models/Booking");
 
 // Get all verified mentors for students
 const getAllMentors = async (req, res) => {
@@ -17,7 +18,6 @@ const getAllMentors = async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch all mentors error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch mentors",
@@ -46,7 +46,6 @@ const getMyMentorProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch mentor profile error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch mentor profile",
@@ -90,8 +89,7 @@ const updateMyMentorProfile = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Provide expertise or sessionPricePaise to update",
+        message: "Provide expertise or sessionPricePaise to update",
       });
     }
 
@@ -127,10 +125,45 @@ const updateMyMentorProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Update mentor profile error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to update mentor profile",
+    });
+  }
+};
+
+// Get bookings for the logged-in mentor only
+const getMyMentorBookings = async (req, res) => {
+  try {
+    const mentor = await Mentor.findOne({
+      userId: req.user.id,
+    });
+
+    if (!mentor) {
+      return res.status(404).json({
+        success: false,
+        message: "Mentor profile not found",
+      });
+    }
+
+    const bookings = await Booking.find({
+      mentorId: mentor._id,
+    })
+      .populate("studentId", "name email")
+      .sort({ slotStart: -1 });
+
+    return res.status(200).json({
+      success: true,
+      message: "Mentor bookings fetched successfully",
+      totalBookings: bookings.length,
+      bookings,
+    });
+  } catch (error) {
+    console.error("Fetch mentor bookings error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch mentor bookings",
     });
   }
 };
@@ -139,4 +172,5 @@ module.exports = {
   getAllMentors,
   getMyMentorProfile,
   updateMyMentorProfile,
+  getMyMentorBookings,
 };

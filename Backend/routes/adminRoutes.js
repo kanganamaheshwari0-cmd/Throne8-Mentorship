@@ -1,8 +1,14 @@
+
 const express = require("express");
 const router = express.Router();
 
 const authMiddleware = require("../middleware/authMiddleware");
-const { verifyMentor } = require("../controllers/adminController");
+
+const {
+  getAllMentors,
+  verifyMentor,
+  getAdminStats,
+} = require("../controllers/adminController");
 
 const adminOnly = (req, res, next) => {
   if (req.user.role !== "admin") {
@@ -15,6 +21,18 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
+// Get all mentors for admin
+router.get(
+  "/mentors",
+  authMiddleware,
+  adminOnly,
+  getAllMentors
+);
+
+// Get admin dashboard statistics
+router.get("/stats", authMiddleware, adminOnly, getAdminStats);
+
+// Verify mentor
 router.patch(
   "/mentors/:mentorId/verify",
   authMiddleware,

@@ -1,5 +1,33 @@
-const Mentor = require("../models/Mentor");
 
+const User = require("../models/User");
+const Mentor = require("../models/Mentor");
+const Booking = require("../models/Booking");
+const Payment = require("../models/Payment");
+
+// GET ALL MENTORS FOR ADMIN
+const getAllMentors = async (req, res) => {
+  try {
+    const mentors = await Mentor.find()
+      .populate("userId", "name email")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      message: "Mentors fetched successfully",
+      totalMentors: mentors.length,
+      mentors,
+    });
+  } catch (error) {
+    console.error("Get all mentors error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch mentors",
+    });
+  }
+};
+
+// VERIFY MENTOR
 const verifyMentor = async (req, res) => {
   try {
     const { mentorId } = req.params;
@@ -42,4 +70,69 @@ const verifyMentor = async (req, res) => {
   }
 };
 
-module.exports = { verifyMentor };
+// ADMIN DASHBOARD STATISTICS
+const getAdminStats = async (req, res) => {
+  try {
+    const [
+      totalUsers,
+      totalStudents,
+      totalMentors,
+      verifiedMentors,
+      totalBookings,
+      confirmedBookings,
+      completedBookings,
+      totalPayments,
+      capturedPayments,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ role: "student" }),
+      Mentor.countDocuments(),
+      Mentor.countDocuments({ isVerified: true }),
+      Booking.countDocuments(),
+      Booking.countDocuments({ status: "CONFIRMED" }),
+      Booking.countDocuments({ status: "COMPLETED" }),
+      Payment.countDocuments(),
+      Payment.find({ status: "CAPTURED" }).select("amountPaise"),
+    ]);
+
+    const totalRevenuePaise = capturedPayments.reduce(
+      (sum, payment) =>
+        sum + Number(payment.amountPaise || 0),
+      0
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin dashboard statistics fetched successfully",
+      stats: {
+        totalUsers,
+        totalStudents,
+        totalMentors,
+        verifiedMentors,
+        pendingMentorVerifications: Math.max(
+          0,
+          totalMentors - verifiedMentors
+        ),
+        totalBookings,
+        confirmedBookings,
+        completedBookings,
+        totalPayments,
+        capturedPayments: capturedPayments.length,
+        totalRevenue: totalRevenuePaise / 100,
+      },
+    });
+  } catch (error) {
+    console.error("Admin stats error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch admin statistics",
+    });
+  }
+};
+
+module.exports = {
+  getAllMentors,
+  verifyMentor,
+  getAdminStats,
+};

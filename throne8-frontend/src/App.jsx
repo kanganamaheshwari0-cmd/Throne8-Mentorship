@@ -15,6 +15,9 @@ import StudentDashboard from "./pages/StudentDashboard";
 import Mentors from "./pages/Mentors";
 import MyBookings from "./pages/MyBookings";
 import MyPayments from "./pages/MyPayments";
+import MentorDashboard from "./pages/MentorDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
+import AdminMentors from "./pages/AdminMentors";
 import "./index.css";
 
 function Home() {
@@ -284,6 +287,12 @@ function App() {
       <Route path="/my-bookings" element={<MyBookings />} />
 
       <Route path="/my-payments" element={<MyPayments />} />
+
+      <Route path="/mentor-dashboard" element={<MentorDashboard />}/>
+
+      <Route path="/admin-dashboard" element={<AdminDashboard />} />
+
+      <Route path="/admin/mentors" element={<AdminMentors />}/>
 
       <Route path="*" element={<NotFound />} />
     </Routes>

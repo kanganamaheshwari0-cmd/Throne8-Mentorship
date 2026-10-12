@@ -7,6 +7,7 @@ const {
   getAllMentors,
   getMyMentorProfile,
   updateMyMentorProfile,
+  getMyMentorBookings,
 } = require("../controllers/mentorController");
 
 // Check mentor role
@@ -29,5 +30,7 @@ router.get("/", getAllMentors);
 
 // Update mentor profile
 router.patch("/me", authMiddleware, mentorOnly, updateMyMentorProfile);
+
+router.get( "/my-bookings", authMiddleware, mentorOnly, getMyMentorBookings);
 
 module.exports = router;

@@ -18,8 +18,15 @@ function Login() {
     setLoading(true);
 
     try {
-      await login(email, password);
-      navigate("/");
+      const loggedInUser = await login(email, password);
+
+      if (loggedInUser.role === "admin") {
+        navigate("/admin-dashboard");
+      } else if (loggedInUser.role === "mentor") {
+        navigate("/mentor-dashboard");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err) {
       setError(
         err.response?.data?.message ||
