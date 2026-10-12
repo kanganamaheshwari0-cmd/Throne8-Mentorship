@@ -6,6 +6,7 @@ const authRoutes = require("./routes/authRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const mentorRoutes = require("./routes/mentorRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const financialLedgerRoutes = require("./routes/financialLedgerRoutes");
 
 const app = express();
 
@@ -16,7 +17,10 @@ credentials: true,
 })
 );
 
-app.use(express.json());
+// app.use(express.json());
+
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true }));
 
 // Payment routes
 app.use("/api/v1/payments", paymentRoutes);
@@ -33,6 +37,8 @@ app.use("/api/v1/mentors", mentorRoutes);
 
 //admin routes
 app.use("/api/v1/admin", adminRoutes);
+
+app.use("/api/v1/financial-ledger", financialLedgerRoutes);
 
 app.get("/", (req, res) => {
 res.status(200).json({

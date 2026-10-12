@@ -18,6 +18,7 @@ import MyPayments from "./pages/MyPayments";
 import MentorDashboard from "./pages/MentorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminMentors from "./pages/AdminMentors";
+import AdminPayouts from "./pages/AdminPayouts";
 import "./index.css";
 
 function Home() {
@@ -293,6 +294,8 @@ function App() {
       <Route path="/admin-dashboard" element={<AdminDashboard />} />
 
       <Route path="/admin/mentors" element={<AdminMentors />}/>
+
+      <Route path="/admin/payouts" element={<AdminPayouts />}/>
 
       <Route path="*" element={<NotFound />} />
     </Routes>

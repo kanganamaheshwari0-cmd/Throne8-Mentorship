@@ -4,6 +4,7 @@ const Razorpay = require("razorpay");
 
 const Payment = require("../models/Payment");
 const Booking = require("../models/Booking");
+const FinancialLedger = require("../models/FinancialLedger");
 
 const getRazorpayInstance = () => {
   if (
@@ -19,7 +20,165 @@ const getRazorpayInstance = () => {
   });
 };
 
-// GET MY PAYMENTS
+// CREATE OR REUSE FINANCIAL LEDGER
+// Unique bookingId and paymentId constraints prevent duplicate entries.
+const ensureFinancialLedger = async (booking, payment) => {
+  if (payment.status !== "CAPTURED" || !payment.capturedAt) {
+    throw new Error("A captured payment is required for ledger creation");
+  }
+
+  if (payment.bookingId.toString() !== booking._id.toString()) {
+    throw new Error("Payment does not belong to this booking");
+  }
+
+  if (
+    payment.amountPaise !== booking.pricePaise ||
+    payment.currency !== booking.currency
+  ) {
+    throw new Error("Payment amount or currency does not match booking");
+  }
+
+  const expectedCommission = Math.round(
+    (booking.pricePaise * booking.commissionRateBps) / 10000
+  );
+
+  if (
+    booking.commissionPaise !== expectedCommission ||
+    booking.mentorGrossPaise !==
+      booking.pricePaise - expectedCommission
+  ) {
+    throw new Error("Booking financial amounts do not match");
+  }
+
+  const existingLedger = await FinancialLedger.findOne({
+    $or: [
+      { bookingId: booking._id },
+      { paymentId: payment._id },
+    ],
+  });
+
+  if (existingLedger) {
+    const sameBooking =
+      existingLedger.bookingId.toString() === booking._id.toString();
+
+    const samePayment =
+      existingLedger.paymentId.toString() === payment._id.toString();
+
+    if (!sameBooking || !samePayment) {
+      throw new Error(
+        "Existing ledger has a conflicting booking or payment"
+      );
+    }
+
+    // Only reconcile dates on an already-confirmed ledger.
+    // Do not override review or refund statuses.
+    if (existingLedger.status === "CONFIRMED") {
+      const updates = {};
+
+      if (
+        booking.status === "COMPLETED" &&
+        booking.completedAt &&
+        booking.payoutEligibleAt
+      ) {
+        updates.completedAt = booking.completedAt;
+        updates.payoutEligibleAt = booking.payoutEligibleAt;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await FinancialLedger.updateOne(
+          {
+            _id: existingLedger._id,
+            status: "CONFIRMED",
+          },
+          { $set: updates }
+        );
+
+        return FinancialLedger.findById(existingLedger._id);
+      }
+    }
+
+    return existingLedger;
+  }
+
+  const isConfirmed =
+    booking.status === "CONFIRMED" ||
+    booking.status === "COMPLETED";
+
+  const ledgerData = {
+    bookingId: booking._id,
+    paymentId: payment._id,
+    currency: payment.currency,
+    studentPaidPaise: payment.amountPaise,
+    commissionRateBps: booking.commissionRateBps,
+    platformCommissionPaise: expectedCommission,
+    mentorEarningsPaise:
+      booking.pricePaise - expectedCommission,
+    status: isConfirmed
+      ? "CONFIRMED"
+      : "CAPTURED_PENDING_BOOKING",
+    capturedAt: payment.capturedAt,
+    bookingConfirmedAt: isConfirmed
+      ? booking.updatedAt || new Date()
+      : null,
+    completedAt:
+      booking.status === "COMPLETED"
+        ? booking.completedAt
+        : null,
+    payoutEligibleAt:
+      booking.status === "COMPLETED"
+        ? booking.payoutEligibleAt
+        : null,
+  };
+
+  try {
+    return await FinancialLedger.create(ledgerData);
+  } catch (error) {
+    // Concurrent verification requests may race on unique indexes.
+    if (error.code === 11000) {
+      const ledger = await FinancialLedger.findOne({
+        $or: [
+          { bookingId: booking._id },
+          { paymentId: payment._id },
+        ],
+      });
+
+      if (
+        ledger &&
+        ledger.bookingId.toString() === booking._id.toString() &&
+        ledger.paymentId.toString() === payment._id.toString()
+      ) {
+        return ledger;
+      }
+
+      throw new Error(
+        "Duplicate ledger conflict requires reconciliation"
+      );
+    }
+
+    throw error;
+  }
+};
+
+// MARK LEDGER FOR REVIEW IF BOOKING CANNOT BE CONFIRMED
+const markLedgerForReview = async (bookingId, paymentId, reason) => {
+  await FinancialLedger.updateOne(
+    {
+      bookingId,
+      paymentId,
+      status: {
+        $nin: ["REFUND_PENDING", "REFUNDED"],
+      },
+    },
+    {
+      $set: {
+        status: "REVIEW_REQUIRED",
+        notes: reason,
+      },
+    }
+  );
+};
+
+// GET LOGGED-IN STUDENT'S PAYMENTS
 const getMyPayments = async (req, res) => {
   try {
     const bookings = await Booking.find({
@@ -51,7 +210,7 @@ const getMyPayments = async (req, res) => {
   }
 };
 
-// CREATE RAZORPAY ORDER
+// CREATE OR REUSE RAZORPAY ORDER
 const createRazorpayOrder = async (req, res) => {
   try {
     const { bookingId } = req.body;
@@ -97,11 +256,11 @@ const createRazorpayOrder = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: "Booking hold has expired. Please create a new booking.",
+        message:
+          "Booking hold has expired. Please create a new booking.",
       });
     }
 
-    // Reuse an existing order for this booking.
     const existingPayment = await Payment.findOne({
       bookingId: booking._id,
       status: "CREATED",
@@ -136,10 +295,7 @@ const createRazorpayOrder = async (req, res) => {
         status: "CREATED",
       });
     } catch (dbError) {
-      console.error(
-        "Payment record creation failed:",
-        dbError.message
-      );
+      console.error("Payment record creation failed:", dbError.message);
 
       return res.status(500).json({
         success: false,
@@ -176,7 +332,6 @@ const verifyRazorpayPayment = async (req, res) => {
       razorpay_signature,
     } = req.body;
 
-    // Validate request data
     if (
       !bookingId ||
       !/^[a-f\d]{24}$/i.test(bookingId) ||
@@ -191,7 +346,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Find booking belonging to the logged-in student
     const booking = await Booking.findOne({
       _id: bookingId,
       studentId: req.user.id,
@@ -204,7 +358,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Find the matching Razorpay order
     const payment = await Payment.findOne({
       bookingId: booking._id,
       gatewayOrderId: razorpay_order_id,
@@ -226,7 +379,7 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Verify Razorpay signature
+    // Verify Razorpay signature with timing-safe comparison.
     const expectedSignature = crypto
       .createHmac("sha256", secret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
@@ -250,7 +403,7 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Verify actual payment status with Razorpay
+    // Confirm actual payment status with Razorpay.
     const razorpay = getRazorpayInstance();
 
     const providerPayment = await razorpay.payments.fetch(
@@ -270,7 +423,7 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // If already captured, do not overwrite it
+    // Persist the verified capture.
     if (payment.status === "CAPTURED") {
       if (payment.gatewayPaymentId !== razorpay_payment_id) {
         return res.status(409).json({
@@ -286,8 +439,6 @@ const verifyRazorpayPayment = async (req, res) => {
         });
       }
 
-      // Save the verified capture first.
-      // Never mark a captured payment as FAILED or CREATED.
       payment.gatewayPaymentId = razorpay_payment_id;
       payment.status = "CAPTURED";
       payment.capturedAt = new Date();
@@ -299,19 +450,70 @@ const verifyRazorpayPayment = async (req, res) => {
       await payment.save();
     }
 
-    // Idempotent response if booking is already confirmed
+    // Create or reuse the ledger after verifying capture.
+    await ensureFinancialLedger(booking, payment);
+
+    // A completed booking must remain completed on a retry.
+    if (booking.status === "COMPLETED") {
+      const ledger = await FinancialLedger.findOne({
+        bookingId: booking._id,
+        paymentId: payment._id,
+      });
+
+      if (!ledger || ledger.status !== "CONFIRMED") {
+        return res.status(409).json({
+          success: false,
+          paymentCaptured: true,
+          reconciliationRequired: true,
+          ledgerStatus: ledger ? ledger.status : null,
+          message:
+            "Completed booking ledger requires reconciliation",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Payment was already verified",
+        bookingStatus: "COMPLETED",
+        paymentStatus: "CAPTURED",
+        ledgerStatus: "CONFIRMED",
+        ledgerRecorded: true,
+      });
+    }
+
+    // Idempotent handling for an already-confirmed booking.
     if (booking.status === "CONFIRMED") {
+      await FinancialLedger.updateOne(
+        {
+          bookingId: booking._id,
+          paymentId: payment._id,
+          status: {
+            $nin: ["REFUND_PENDING", "REFUNDED"],
+          },
+        },
+        {
+          $set: {
+            status: "CONFIRMED",
+            bookingConfirmedAt:
+              booking.updatedAt || new Date(),
+          },
+        }
+      );
+
       return res.status(200).json({
         success: true,
         message: "Payment was already verified",
         bookingStatus: "CONFIRMED",
         paymentStatus: "CAPTURED",
+        ledgerStatus: "CONFIRMED",
+        ledgerRecorded: true,
       });
     }
 
     const now = new Date();
 
-    // Do not confirm expired, cancelled, or otherwise ineligible bookings
+    // Captured payments that cannot confirm their booking
+    // must be reviewed; do not automatically refund.
     if (
       booking.status !== "PENDING_PAYMENT" ||
       booking.holdExpiresAt <= now
@@ -333,6 +535,12 @@ const verifyRazorpayPayment = async (req, res) => {
         );
       }
 
+      await markLedgerForReview(
+        booking._id,
+        payment._id,
+        "Payment captured but booking could not be confirmed. Reconciliation or refund review is required."
+      );
+
       return res.status(409).json({
         success: false,
         paymentCaptured: true,
@@ -342,12 +550,13 @@ const verifyRazorpayPayment = async (req, res) => {
           booking.holdExpiresAt <= now
             ? "EXPIRED"
             : booking.status,
+        ledgerStatus: "REVIEW_REQUIRED",
         message:
           "Payment was captured, but the booking could not be confirmed. Reconciliation or refund review is required.",
       });
     }
 
-    // Atomically confirm only if the hold is still active
+    // Atomically confirm only while the hold remains active.
     const confirmedBooking = await Booking.findOneAndUpdate(
       {
         _id: booking._id,
@@ -362,20 +571,75 @@ const verifyRazorpayPayment = async (req, res) => {
     );
 
     if (!confirmedBooking) {
+      const latestBooking = await Booking.findById(booking._id);
+
+      if (latestBooking && latestBooking.status === "CONFIRMED") {
+        await FinancialLedger.updateOne(
+          {
+            bookingId: booking._id,
+            paymentId: payment._id,
+            status: {
+              $nin: ["REFUND_PENDING", "REFUNDED"],
+            },
+          },
+          {
+            $set: {
+              status: "CONFIRMED",
+              bookingConfirmedAt:
+                latestBooking.updatedAt || new Date(),
+            },
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message: "Payment was already verified",
+          bookingStatus: "CONFIRMED",
+          paymentStatus: "CAPTURED",
+          ledgerRecorded: true,
+        });
+      }
+
+      await markLedgerForReview(
+        booking._id,
+        payment._id,
+        "Payment captured but atomic booking confirmation failed. Reconciliation or refund review is required."
+      );
+
       return res.status(409).json({
         success: false,
         paymentCaptured: true,
         paymentStatus: "CAPTURED",
+        ledgerStatus: "REVIEW_REQUIRED",
         message:
           "Payment was captured, but booking confirmation failed. Reconciliation or refund review is required.",
       });
     }
+
+    // Update ledger only after booking confirmation succeeds.
+    await FinancialLedger.updateOne(
+      {
+        bookingId: confirmedBooking._id,
+        paymentId: payment._id,
+        status: {
+          $nin: ["REFUND_PENDING", "REFUNDED"],
+        },
+      },
+      {
+        $set: {
+          status: "CONFIRMED",
+          bookingConfirmedAt: new Date(),
+        },
+      }
+    );
 
     return res.status(200).json({
       success: true,
       message: "Payment verified and booking confirmed",
       bookingStatus: "CONFIRMED",
       paymentStatus: "CAPTURED",
+      ledgerStatus: "CONFIRMED",
+      ledgerRecorded: true,
     });
   } catch (error) {
     console.error(

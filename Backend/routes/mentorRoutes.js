@@ -8,6 +8,7 @@ const {
   getMyMentorProfile,
   updateMyMentorProfile,
   getMyMentorBookings,
+  getMyMentorEarnings,
 } = require("../controllers/mentorController");
 
 // Check mentor role
@@ -22,15 +23,39 @@ const mentorOnly = (req, res, next) => {
   next();
 };
 
-// Get mentor profile
-router.get("/me", authMiddleware, mentorOnly, getMyMentorProfile);
-
-//get all mentor
+// Get all verified mentors
 router.get("/", getAllMentors);
 
-// Update mentor profile
-router.patch("/me", authMiddleware, mentorOnly, updateMyMentorProfile);
+// Get mentor profile
+router.get(
+  "/me",
+  authMiddleware,
+  mentorOnly,
+  getMyMentorProfile
+);
 
-router.get( "/my-bookings", authMiddleware, mentorOnly, getMyMentorBookings);
+// Update mentor profile
+router.patch(
+  "/me",
+  authMiddleware,
+  mentorOnly,
+  updateMyMentorProfile
+);
+
+// Get mentor bookings
+router.get(
+  "/my-bookings",
+  authMiddleware,
+  mentorOnly,
+  getMyMentorBookings
+);
+
+// Get mentor earnings and payout history
+router.get(
+  "/earnings",
+  authMiddleware,
+  mentorOnly,
+  getMyMentorEarnings
+);
 
 module.exports = router;

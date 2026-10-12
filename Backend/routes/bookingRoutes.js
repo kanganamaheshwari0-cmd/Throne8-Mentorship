@@ -7,6 +7,7 @@ const authMiddleware = require("../middleware/authMiddleware");
 const {
   createBooking,
   getMyBookings,
+  getMentorBookings,
   completeMentorBooking,
 } = require("../controllers/bookingController");
 
@@ -15,6 +16,9 @@ router.get("/my", authMiddleware, getMyBookings);
 
 // Create a mentorship booking
 router.post("/", authMiddleware, createBooking);
+
+// Get logged-in mentor's bookings
+router.get("/mentor", authMiddleware, getMentorBookings);
 
 // Complete a confirmed booking (mentor only)
 router.patch(

@@ -3,12 +3,6 @@ const mongoose = require("mongoose");
 
 const payoutSchema = new mongoose.Schema(
   {
-    earningId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Earning",
-      required: true,
-    },
-
     mentorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Mentor",
@@ -16,48 +10,71 @@ const payoutSchema = new mongoose.Schema(
       index: true,
     },
 
+    bookingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Booking",
+      required: true,
+      unique: true,
+    },
+
     amountPaise: {
       type: Number,
       required: true,
       min: 1,
+      validate: {
+        validator: Number.isSafeInteger,
+        message: "Payout amount must be a whole number in paise.",
+      },
     },
 
-    providerTransferId: {
+    currency: {
       type: String,
-      default: null,
+      enum: ["INR"],
+      default: "INR",
+      required: true,
     },
 
-    attempt: {
-      type: Number,
-      default: 1,
-      min: 1,
-    },
-
-    state: {
+    status: {
       type: String,
       enum: [
-        "QUEUED",
-        "INITIATED",
+        "PENDING",
+        "APPROVED",
         "PROCESSING",
-        "SUCCEEDED",
+        "PAID",
         "FAILED",
         "CANCELLED",
       ],
-      default: "QUEUED",
+      default: "PENDING",
       index: true,
     },
 
-    initiatedAt: {
+    payoutEligibleAt: {
+      type: Date,
+      required: true,
+    },
+
+    approvedAt: {
       type: Date,
       default: null,
     },
 
-    confirmedAt: {
+    paidAt: {
       type: Date,
       default: null,
     },
 
-    failureCode: {
+    gateway: {
+      type: String,
+      enum: ["razorpay"],
+      default: "razorpay",
+    },
+
+    gatewayPayoutId: {
+      type: String,
+      default: null,
+    },
+
+    failureReason: {
       type: String,
       default: null,
     },
@@ -67,19 +84,10 @@ const payoutSchema = new mongoose.Schema(
   }
 );
 
-payoutSchema.index(
-  { earningId: 1 },
-  { unique: true }
-);
-
-payoutSchema.index(
-  { providerTransferId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      providerTransferId: { $type: "string" },
-    },
-  }
-);
+payoutSchema.index({
+  mentorId: 1,
+  status: 1,
+  createdAt: -1,
+});
 
 module.exports = mongoose.model("Payout", payoutSchema);

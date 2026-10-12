@@ -10,6 +10,12 @@ const {
   getAdminStats,
 } = require("../controllers/adminController");
 
+const {
+  getAdminPayouts,
+  generateEligiblePayouts,
+  approvePayout,
+} = require("../controllers/payoutController");
+
 const adminOnly = (req, res, next) => {
   if (req.user.role !== "admin") {
     return res.status(403).json({
@@ -21,23 +27,29 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
-// Get all mentors for admin
-router.get(
-  "/mentors",
-  authMiddleware,
-  adminOnly,
-  getAllMentors
-);
+// All admin routes require authentication and admin role.
+router.use(authMiddleware, adminOnly);
 
-// Get admin dashboard statistics
-router.get("/stats", authMiddleware, adminOnly, getAdminStats);
+// Mentor management
+router.get("/mentors", getAllMentors);
+router.get("/stats", getAdminStats);
 
-// Verify mentor
 router.patch(
   "/mentors/:mentorId/verify",
-  authMiddleware,
-  adminOnly,
   verifyMentor
+);
+
+// Payout management
+router.get("/payouts", getAdminPayouts);
+
+router.post(
+  "/payouts/generate",
+  generateEligiblePayouts
+);
+
+router.patch(
+  "/payouts/:payoutId/approve",
+  approvePayout
 );
 
 module.exports = router;
