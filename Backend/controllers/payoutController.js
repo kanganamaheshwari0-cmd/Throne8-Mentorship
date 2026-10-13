@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");

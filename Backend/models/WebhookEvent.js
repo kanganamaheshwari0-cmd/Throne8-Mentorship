@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const webhookEventSchema = new mongoose.Schema(

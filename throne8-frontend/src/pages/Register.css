@@ -1,0 +1,57 @@
+
+/* THRONE8 REGISTER PAGE */
+
+.throne-auth-page .auth-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 20px;
+  padding: 12px;
+  color: #8ce5bd;
+  background: rgba(82, 211, 157, 0.09);
+  border: 1px solid rgba(82, 211, 157, 0.3);
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.throne-auth-page .auth-success span {
+  flex-shrink: 0;
+  font-weight: 800;
+}
+
+.throne-auth-page .auth-field-hint {
+  margin: 8px 0 0;
+  color: #8994b9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Registration form has one extra field */
+.throne-auth-page .auth-card {
+  padding: 32px;
+}
+
+.throne-auth-page .auth-card-heading {
+  margin-bottom: 24px;
+}
+
+.throne-auth-page .auth-field {
+  margin-bottom: 17px;
+}
+
+/* Mobile layout */
+@media (max-width: 680px) {
+  .throne-auth-page .auth-card {
+    padding: 24px 20px;
+  }
+
+  .throne-auth-page .auth-card-heading {
+    margin-bottom: 22px;
+  }
+
+  .throne-auth-page .auth-field {
+    margin-bottom: 17px;
+  }
+}

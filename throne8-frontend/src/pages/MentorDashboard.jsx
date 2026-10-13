@@ -1,1058 +1,983 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/useAuth";
 import api from "../services/api";
 
+const styles = `
+  * { box-sizing: border-box; }
+
+  .mentor-page {
+    min-height: 100vh;
+    background: #080b16;
+    color: #f4f4ff;
+    font-family: Inter, system-ui, sans-serif;
+  }
+
+  .mentor-nav {
+    min-height: 76px;
+    padding: 18px 7%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    background: rgba(13, 17, 34, .96);
+    border-bottom: 1px solid rgba(167, 139, 250, .17);
+  }
+
+  .mentor-brand {
+    color: #c4b5fd;
+    font-size: 25px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-decoration: none;
+  }
+
+  .mentor-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .mentor-nav-links a {
+    color: #c6c8dc;
+    text-decoration: none;
+    font-size: 14px;
+  }
+
+  .mentor-nav-links a:hover { color: #c4b5fd; }
+
+  .mentor-logout, .mentor-refresh {
+    border: 1px solid rgba(196, 181, 253, .4);
+    background: transparent;
+    color: #ddd6fe;
+    padding: 10px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+  }
+
+  .mentor-logout:hover, .mentor-refresh:hover {
+    background: rgba(139, 92, 246, .16);
+  }
+
+  .mentor-main {
+    max-width: 1240px;
+    margin: auto;
+    padding: 42px 24px 65px;
+  }
+
+  .mentor-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 40px;
+    border-radius: 24px;
+    background: linear-gradient(120deg, #17152f, #242052 55%, #30205d);
+    border: 1px solid rgba(196, 181, 253, .2);
+    margin-bottom: 28px;
+  }
+
+  .mentor-hero::after {
+    content: "";
+    position: absolute;
+    width: 240px;
+    height: 240px;
+    right: -80px;
+    top: -110px;
+    border-radius: 50%;
+    background: rgba(167, 139, 250, .16);
+    pointer-events: none;
+  }
+
+  .mentor-eyebrow {
+    color: #c4b5fd;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .mentor-hero h1 {
+    font-size: clamp(29px, 4vw, 43px);
+    margin: 14px 0 12px;
+    letter-spacing: -1px;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-hero p {
+    max-width: 660px;
+    color: #c6c4df;
+    line-height: 1.8;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .mentor-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 35px 0 20px;
+  }
+
+  .mentor-section-heading h2 {
+    font-size: 21px;
+    margin: 0 0 7px;
+  }
+
+  .mentor-section-heading p {
+    color: #969bb8;
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.7;
+  }
+
+  .mentor-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 17px;
+    margin-bottom: 35px;
+  }
+
+  .mentor-stat {
+    background: linear-gradient(145deg, #12182b, #101426);
+    border: 1px solid #262c48;
+    padding: 22px;
+    border-radius: 18px;
+    min-width: 0;
+  }
+
+  .mentor-stat-label {
+    color: #a3a8c2;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+
+  .mentor-stat-value {
+    color: #f4f4ff;
+    font-size: clamp(23px, 3vw, 31px);
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-stat-note {
+    margin-top: 9px;
+    color: #969bb8;
+    font-size: 12px;
+  }
+
+  .mentor-panel {
+    background: linear-gradient(145deg, #12182b, #101426);
+    border: 1px solid #262c48;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 26px;
+  }
+
+  .mentor-panel-head {
+    padding: 22px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #262c48;
+  }
+
+  .mentor-panel-head h3 {
+    margin: 0 0 6px;
+    font-size: 17px;
+  }
+
+  .mentor-panel-head p {
+    color: #969bb8;
+    margin: 0;
+    font-size: 12px;
+  }
+
+  .mentor-filters {
+    padding: 18px 24px;
+    display: flex;
+    gap: 9px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #262c48;
+  }
+
+  .mentor-filter {
+    border: 1px solid #343a58;
+    background: #11162a;
+    color: #aeb3ce;
+    border-radius: 9px;
+    padding: 9px 13px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .mentor-filter.active {
+    background: rgba(139, 92, 246, .2);
+    color: #ddd6fe;
+    border-color: #8b5cf6;
+  }
+
+  .mentor-bookings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 22px;
+  }
+
+  .mentor-booking {
+    border: 1px solid #292f4b;
+    border-radius: 15px;
+    padding: 20px;
+    background: rgba(8, 11, 22, .45);
+    min-width: 0;
+  }
+
+  .mentor-booking-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 17px;
+  }
+
+  .mentor-booking h4 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-booking-sub {
+    color: #969bb8;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-status {
+    display: inline-block;
+    border: 1px solid #343a58;
+    color: #c6c8dc;
+    background: #171d32;
+    border-radius: 20px;
+    padding: 6px 9px;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+    text-transform: capitalize;
+  }
+
+  .mentor-status.completed {
+    color: #86efac;
+    background: rgba(34, 197, 94, .1);
+    border-color: rgba(34, 197, 94, .3);
+  }
+
+  .mentor-status.confirmed, .mentor-status.approved {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, .13);
+    border-color: rgba(139, 92, 246, .3);
+  }
+
+  .mentor-status.cancelled, .mentor-status.rejected {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, .1);
+    border-color: rgba(239, 68, 68, .3);
+  }
+
+  .mentor-booking-details {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .mentor-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    font-size: 12px;
+  }
+
+  .mentor-detail-row span:first-child { color: #969bb8; }
+
+  .mentor-detail-row span:last-child {
+    text-align: right;
+    color: #e2e4f5;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-complete-btn {
+    width: 100%;
+    border: 0;
+    border-radius: 10px;
+    padding: 12px;
+    background: linear-gradient(100deg, #7c3aed, #6d5ce8);
+    color: white;
+    font-weight: 800;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mentor-complete-btn:hover { filter: brightness(1.12); }
+
+  .mentor-complete-btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+  }
+
+  .mentor-empty {
+    padding: 42px 20px;
+    text-align: center;
+    color: #969bb8;
+    line-height: 1.8;
+    grid-column: 1 / -1;
+    font-size: 13px;
+  }
+
+  .mentor-error {
+    padding: 13px 16px;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    border: 1px solid rgba(248, 113, 113, .3);
+    color: #fca5a5;
+    background: rgba(127, 29, 29, .15);
+    font-size: 13px;
+  }
+
+  .mentor-success {
+    padding: 13px 16px;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    border: 1px solid rgba(74, 222, 128, .3);
+    color: #86efac;
+    background: rgba(20, 83, 45, .15);
+    font-size: 13px;
+  }
+
+  .mentor-payout-list {
+    padding: 0 24px;
+  }
+
+  .mentor-payout {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    padding: 17px 0;
+    border-bottom: 1px solid #252b45;
+  }
+
+  .mentor-payout:last-child { border-bottom: 0; }
+
+  .mentor-payout strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+  }
+
+  .mentor-payout small {
+    color: #969bb8;
+    font-size: 11px;
+  }
+
+  .mentor-payout-amount {
+    font-size: 15px;
+    font-weight: 800;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .mentor-payout-status {
+    margin-top: 5px;
+    text-align: right;
+    color: #c4b5fd;
+    font-size: 11px;
+    text-transform: capitalize;
+  }
+
+  .mentor-footer {
+    padding: 25px;
+    text-align: center;
+    color: #777e9d;
+    border-top: 1px solid #1e243b;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  @media (max-width: 900px) {
+    .mentor-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mentor-bookings { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 600px) {
+    .mentor-nav { padding: 17px 20px; }
+    .mentor-nav-links { gap: 12px; }
+    .mentor-nav-links a { font-size: 12px; }
+    .mentor-main { padding: 28px 15px 45px; }
+    .mentor-hero { padding: 28px 22px; }
+    .mentor-stats { gap: 10px; }
+    .mentor-stat { padding: 16px; }
+    .mentor-panel-head { padding: 18px; }
+    .mentor-filters { padding: 15px; }
+    .mentor-bookings { padding: 14px; }
+    .mentor-booking { padding: 16px; }
+    .mentor-payout-list { padding: 0 16px; }
+  }
+`;
+
 const FILTERS = [
-  { label: "All Sessions", value: "ALL" },
-  { label: "Upcoming", value: "UPCOMING" },
-  { label: "Needs Completion", value: "NEEDS_COMPLETION" },
-  { label: "Completed", value: "COMPLETED" },
-  { label: "Expired", value: "EXPIRED" },
-  { label: "Pending Payment", value: "PENDING_PAYMENT" },
+  "All",
+  "Pending",
+  "Confirmed",
+  "Completed",
+  "Cancelled",
+  "Other",
 ];
 
-function MentorDashboard() {
-  const { user, logout } = useAuth();
+const getList = (response) => {
+  const data = response?.data;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.bookings)) return data.bookings;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.payments)) return data.payments;
+  if (Array.isArray(data?.payouts)) return data.payouts;
+  if (Array.isArray(data?.earnings)) return data.earnings;
+  return [];
+};
+
+const getStatus = (booking) =>
+  String(
+    booking?.status ||
+      booking?.bookingStatus ||
+      booking?.paymentStatus ||
+      "pending"
+  ).toLowerCase();
+
+const getStudentName = (booking) => {
+  const student =
+    booking?.student ||
+    booking?.user ||
+    booking?.studentId ||
+    booking?.userId;
+
+  if (typeof student === "string") return student;
+  return (
+    student?.name ||
+    student?.fullName ||
+    student?.username ||
+    booking?.studentName ||
+    booking?.userName ||
+    "Student"
+  );
+};
+
+const getDate = (booking) => {
+  const value =
+    booking?.date ||
+    booking?.sessionDate ||
+    booking?.bookingDate ||
+    booking?.slotDate;
+
+  if (!value) return "Date not specified";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const getTime = (booking) =>
+  booking?.time ||
+  booking?.slot ||
+  booking?.sessionTime ||
+  booking?.startTime ||
+  "Time not specified";
+
+const getAmount = (item) => {
+  const value =
+    item?.amount ??
+    item?.price ??
+    item?.totalAmount ??
+    item?.earnings ??
+    item?.fee ??
+    0;
+
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number(amount) || 0);
+
+const getBookingId = (booking) =>
+  booking?._id || booking?.id || booking?.bookingId;
+
+const getSlotEnd = (booking) => {
+  const dateValue =
+    booking?.date ||
+    booking?.sessionDate ||
+    booking?.bookingDate ||
+    booking?.slotDate;
+
+  const endValue =
+    booking?.slotEnd ||
+    booking?.endTime ||
+    booking?.sessionEndTime;
+
+  if (!dateValue || !endValue) return null;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  if (typeof endValue === "string" && endValue.includes("T")) {
+    const fullDate = new Date(endValue);
+    return Number.isNaN(fullDate.getTime()) ? null : fullDate;
+  }
+
+  const match = String(endValue).match(/(\\d{1,2}):(\\d{2})\\s*(AM|PM)?/i);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3]?.toUpperCase();
+
+  if (meridiem === "PM" && hours < 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+};
+
+export default function MentorDashboard() {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   const [bookings, setBookings] = useState([]);
   const [earnings, setEarnings] = useState(null);
+  const [payouts, setPayouts] = useState([]);
+  const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(true);
-  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [completingId, setCompletingId] = useState(null);
   const [error, setError] = useState("");
-  const [earningsError, setEarningsError] = useState("");
   const [success, setSuccess] = useState("");
-  const [completingId, setCompletingId] = useState("");
-  const [activeFilter, setActiveFilter] = useState("ALL");
 
-  const fetchBookings = useCallback(async () => {
+  const displayName =
+    user?.name || user?.fullName || user?.username || "Mentor";
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    const errors = [];
+
     try {
-      setLoading(true);
-      setError("");
-
       const response = await api.get("/mentors/my-bookings");
-      setBookings(response.data.bookings || []);
+      setBookings(getList(response));
     } catch (err) {
-      setError(
-        err.response?.data?.message ||
-          "Failed to load mentor bookings."
+      errors.push(
+        err?.response?.data?.message || "Bookings load nahi ho paayin."
       );
-    } finally {
-      setLoading(false);
+      setBookings([]);
     }
-  }, []);
 
-  const fetchEarnings = useCallback(async () => {
     try {
-      setEarningsLoading(true);
-      setEarningsError("");
-
       const response = await api.get("/mentors/earnings");
-      setEarnings(response.data);
-    } catch (err) {
-      setEarningsError(
-        err.response?.data?.message ||
-          "Failed to load earnings."
-      );
-    } finally {
-      setEarningsLoading(false);
-    }
-  }, []);
+      const data = response?.data;
+      setEarnings(data?.earnings ?? data?.data ?? data ?? null);
 
-  const refreshDashboard = async () => {
-    await Promise.all([fetchBookings(), fetchEarnings()]);
-  };
+      if (Array.isArray(data?.payouts)) {
+        setPayouts(data.payouts);
+      } else if (Array.isArray(data?.payoutHistory)) {
+        setPayouts(data.payoutHistory);
+      } else if (Array.isArray(data?.history)) {
+        setPayouts(data.history);
+      } else {
+        setPayouts([]);
+      }
+    } catch (err) {
+      errors.push(
+        err?.response?.data?.message || "Earnings load nahi ho paayin."
+      );
+      setEarnings(null);
+      setPayouts([]);
+    }
+
+    if (errors.length) setError(errors.join(" "));
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    fetchBookings();
-    fetchEarnings();
-  }, [fetchBookings, fetchEarnings]);
+    loadDashboard();
+  }, [loadDashboard]);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate("/login");
+    } catch (err) {
+      console.error("Logout failed:", err);
+      setError("Logout nahi ho paya. Dobara try karein.");
+    }
   };
 
-  const handleCompleteSession = async (booking) => {
-    if (booking.status !== "CONFIRMED") {
-      setError("Only confirmed bookings can be completed.");
+  const handleComplete = async (booking) => {
+    const bookingId = getBookingId(booking);
+
+    if (!bookingId) {
+      setError("Booking ID nahi mili, is session ko complete nahi kar sakte.");
       return;
     }
 
-    if (
-      !booking.slotEnd ||
-      new Date(booking.slotEnd).getTime() > Date.now()
-    ) {
-      setError("You can complete the session after its end time.");
+    const end = getSlotEnd(booking);
+
+    if (!end) {
+      setError(
+        "Session ka end time nahi mil raha. Booking details mein date aur slotEnd/endTime check karein."
+      );
       return;
     }
 
-    const confirmed = window.confirm(
-      "Are you sure you want to mark this session as completed?"
-    );
+    if (new Date() < end) {
+      setError(
+        `Session ${end.toLocaleString("en-IN")} se pehle complete nahi kiya ja sakta.`
+      );
+      return;
+    }
 
-    if (!confirmed) return;
+    setCompletingId(String(bookingId));
+    setError("");
+    setSuccess("");
 
     try {
-      setCompletingId(booking._id);
-      setError("");
-      setSuccess("");
-
-      const response = await api.patch(
-        `/bookings/${booking._id}/complete`
-      );
-
-      setSuccess(
-        response.data.message ||
-          "Mentor session completed successfully."
-      );
-
-      await refreshDashboard();
+      await api.patch(`/bookings/${bookingId}/complete`);
+      setSuccess("Session successfully complete ho gaya!");
+      await loadDashboard();
     } catch (err) {
       setError(
-        err.response?.data?.message ||
-          "Failed to complete the session."
+        err?.response?.data?.message ||
+          "Session complete nahi hua. Please dobara try karein."
       );
     } finally {
-      setCompletingId("");
+      setCompletingId(null);
     }
   };
 
-  const formatDate = (date) => {
-    if (!date) return "Not available";
-
-    return new Date(date).toLocaleString("en-IN", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: "Asia/Kolkata",
-    });
-  };
-
-  const formatPrice = (paise = 0) =>
-    new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 2,
-    }).format(Number(paise || 0) / 100);
-
-  const summary = earnings?.summary || {};
-  const payoutHistory = Array.isArray(earnings?.payoutHistory)
-    ? earnings.payoutHistory
-    : [];
-
-  const counts = useMemo(() => {
-    const now = Date.now();
-
-    return {
-      ALL: bookings.length,
-      UPCOMING: bookings.filter(
-        (b) =>
-          b.status === "CONFIRMED" &&
-          b.slotEnd &&
-          new Date(b.slotEnd).getTime() > now
-      ).length,
-      NEEDS_COMPLETION: bookings.filter(
-        (b) =>
-          b.status === "CONFIRMED" &&
-          b.slotEnd &&
-          new Date(b.slotEnd).getTime() <= now
-      ).length,
-      COMPLETED: bookings.filter(
-        (b) => b.status === "COMPLETED"
-      ).length,
-      EXPIRED: bookings.filter(
-        (b) => b.status === "EXPIRED"
-      ).length,
-      PENDING_PAYMENT: bookings.filter(
-        (b) => b.status === "PENDING_PAYMENT"
-      ).length,
-    };
-  }, [bookings]);
-
   const filteredBookings = useMemo(() => {
-    const now = Date.now();
+    if (filter === "All") return bookings;
 
     return bookings.filter((booking) => {
-      if (activeFilter === "ALL") return true;
+      const status = getStatus(booking);
 
-      if (activeFilter === "UPCOMING") {
-        return (
-          booking.status === "CONFIRMED" &&
-          booking.slotEnd &&
-          new Date(booking.slotEnd).getTime() > now
-        );
-      }
+      if (filter === "Pending") return status === "pending";
+      if (filter === "Confirmed")
+        return ["confirmed", "approved", "accepted", "booked"].includes(status);
+      if (filter === "Completed")
+        return ["completed", "complete"].includes(status);
+      if (filter === "Cancelled")
+        return ["cancelled", "canceled", "rejected"].includes(status);
 
-      if (activeFilter === "NEEDS_COMPLETION") {
-        return (
-          booking.status === "CONFIRMED" &&
-          booking.slotEnd &&
-          new Date(booking.slotEnd).getTime() <= now
-        );
-      }
-
-      return booking.status === activeFilter;
+      return ![
+        "pending",
+        "confirmed",
+        "approved",
+        "accepted",
+        "booked",
+        "completed",
+        "complete",
+        "cancelled",
+        "canceled",
+        "rejected",
+      ].includes(status);
     });
-  }, [bookings, activeFilter]);
+  }, [bookings, filter]);
 
-  const earningCards = [
-    {
-      label: "Total Completed Earnings",
-      amount: summary.totalCompletedEarningsPaise,
-      detail: `${summary.completedSessions || 0} completed session(s)`,
-      type: "total",
-    },
-    {
-      label: "Pending Eligibility",
-      amount: summary.pendingEarningsPaise,
-      detail: "Waiting for the 15-day period",
-    },
-    {
-      label: "Eligible Unpaid",
-      amount: summary.eligibleUnpaidEarningsPaise,
-      detail: "Eligible, not yet paid",
-    },
-    {
-      label: "Pending Approval",
-      amount: summary.payoutPendingPaise,
-      detail: "Waiting for admin approval",
-    },
-    {
-      label: "Approved",
-      amount: summary.payoutApprovedPaise,
-      detail: "Approved for processing",
-    },
-    {
-      label: "Processing",
-      amount: summary.payoutProcessingPaise,
-      detail: "Payout being processed",
-    },
-    {
-      label: "Total Paid",
-      amount: summary.totalPaidPaise,
-      detail: "Recorded as paid",
-    },
-    {
-      label: "Failed Payouts",
-      amount: summary.payoutFailedPaise,
-      detail: "Requires review",
-    },
-  ];
+  const countByStatus = (statuses) =>
+    bookings.filter((booking) => statuses.includes(getStatus(booking))).length;
+
+  const totalBookings = bookings.length;
+  const pendingBookings = countByStatus(["pending"]);
+  const completedBookings = countByStatus(["completed", "complete"]);
+
+  const earningsAmount = (() => {
+    if (typeof earnings === "number" || typeof earnings === "string") {
+      return Number(earnings) || 0;
+    }
+
+    return Number(
+      earnings?.totalEarnings ??
+        earnings?.total ??
+        earnings?.earned ??
+        earnings?.availableBalance ??
+        earnings?.balance ??
+        earnings?.amount ??
+        0
+    ) || 0;
+  })();
+
+  const isCompleteAllowed = (booking) => {
+    const status = getStatus(booking);
+    if (["completed", "complete", "cancelled", "canceled", "rejected"].includes(status)) {
+      return false;
+    }
+
+    const end = getSlotEnd(booking);
+    return Boolean(end && new Date() >= end);
+  };
 
   return (
-    <main className="auth-page mentor-dashboard">
-      <style>{`
-        .mentor-dashboard {
-          min-height: 100vh;
-          padding: 38px 18px 64px;
-          background:
-            radial-gradient(ellipse at 90% 0%, #383326 0%, transparent 38%),
-            #111210;
-          color: #f4f1eb;
-        }
-
-        .mentor-dashboard-card {
-          width: min(1120px, 100%);
-          max-width: 1120px;
-          box-sizing: border-box;
-          margin: 0 auto;
-          padding: clamp(20px, 4vw, 38px);
-          background: rgba(27, 28, 24, 0.97);
-          border: 1px solid #424033;
-          border-radius: 20px;
-          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
-        }
-
-        .mentor-dashboard .mentor-dashboard-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          flex-wrap: wrap;
-          padding-bottom: 28px;
-          border-bottom: 1px solid #34352e;
-        }
-
-        .mentor-dashboard .eyebrow {
-          margin: 0 0 10px;
-          color: #d7b779;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 2.3px;
-        }
-
-        .mentor-dashboard .mentor-dashboard-header h1 {
-          margin: 0;
-          color: #f4f1eb;
-          font-family: "Manrope", sans-serif;
-          font-size: clamp(28px, 4vw, 38px);
-          letter-spacing: -1px;
-        }
-
-        .mentor-dashboard .mentor-dashboard-header p:last-child {
-          margin: 10px 0 0;
-          color: #aaa99f;
-        }
-
-        .mentor-dashboard button {
-          cursor: pointer;
-        }
-
-        .mentor-dashboard .btn {
-          min-height: 42px;
-          padding: 10px 16px;
-          border-radius: 8px;
-          font-weight: 700;
-          transition: background .2s ease, border-color .2s ease;
-        }
-
-        .mentor-dashboard .btn-outline {
-          background: transparent;
-          color: #e7d2a4;
-          border: 1px solid #65563a;
-        }
-
-        .mentor-dashboard .btn-outline:hover:not(:disabled) {
-          background: #302c21;
-          border-color: #d7b779;
-        }
-
-        .mentor-dashboard .btn-primary {
-          background: #d7b779;
-          color: #171610;
-          border: 1px solid #d7b779;
-        }
-
-        .mentor-dashboard .btn-primary:hover:not(:disabled) {
-          background: #e7ca91;
-        }
-
-        .mentor-dashboard button:disabled {
-          opacity: .55;
-          cursor: not-allowed;
-        }
-
-        .mentor-dashboard .mentor-stats {
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 12px;
-          margin: 26px 0 36px;
-        }
-
-        .mentor-dashboard .mentor-stat {
-          min-width: 0;
-          padding: 18px;
-          background: #151612;
-          border: 1px solid #34352e;
-          border-radius: 12px;
-        }
-
-        .mentor-dashboard .mentor-stat span {
-          display: block;
-          color: #aaa99f;
-          font-size: 12px;
-          line-height: 1.5;
-        }
-
-        .mentor-dashboard .mentor-stat h2 {
-          margin: 10px 0 0;
-          color: #d7b779;
-          font-family: "Manrope", sans-serif;
-          font-size: 29px;
-        }
-
-        .mentor-dashboard .mentor-earnings-section {
-          margin: 0 0 42px;
-          padding: clamp(16px, 3vw, 26px);
-          background: #151612;
-          border: 1px solid #393a32;
-          border-radius: 16px;
-        }
-
-        .mentor-dashboard .mentor-section-heading {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-
-        .mentor-dashboard .mentor-section-heading h2,
-        .mentor-dashboard .mentor-bookings-title {
-          margin: 0;
-          color: #f4f1eb;
-          font-family: "Manrope", sans-serif;
-          font-size: clamp(21px, 3vw, 27px);
-        }
-
-        .mentor-dashboard .mentor-section-heading p {
-          margin: 8px 0 0;
-          color: #aaa99f;
-          font-size: 14px;
-          line-height: 1.6;
-        }
-
-        .mentor-dashboard .mentor-earnings-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 13px;
-          margin: 22px 0;
-        }
-
-        .mentor-dashboard .mentor-earning-card {
-          min-width: 0;
-          padding: 18px 15px;
-          background: linear-gradient(145deg, #22231e, #1a1b17);
-          border: 1px solid #424033;
-          border-radius: 12px;
-          transition: border-color .2s ease, transform .2s ease;
-        }
-
-        .mentor-dashboard .mentor-earning-card:hover {
-          border-color: #806b43;
-          transform: translateY(-2px);
-        }
-
-        .mentor-dashboard .mentor-earning-card.total {
-          background: linear-gradient(145deg, #393020, #222019);
-          border-color: #806b43;
-        }
-
-        .mentor-dashboard .mentor-earning-card span {
-          display: block;
-          color: #c2bfb3;
-          font-size: 12px;
-          line-height: 1.6;
-          min-height: 38px;
-        }
-
-        .mentor-dashboard .mentor-earning-card strong {
-          display: block;
-          margin: 10px 0;
-          color: #d7b779;
-          font-size: clamp(19px, 2vw, 25px);
-          font-family: "Manrope", sans-serif;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .mentor-earning-card small {
-          display: block;
-          color: #a3a398;
-          font-size: 11px;
-          line-height: 1.6;
-        }
-
-        .mentor-dashboard .mentor-finance-note {
-          padding: 13px 15px;
-          border-left: 3px solid #806b43;
-          background: #1c1d18;
-          color: #aaa99f;
-          font-size: 12px;
-          line-height: 1.8;
-        }
-
-        .mentor-dashboard .mentor-table-wrap {
-          width: 100%;
-          margin-top: 16px;
-          overflow-x: auto;
-          border: 1px solid #393a32;
-          border-radius: 10px;
-        }
-
-        .mentor-dashboard .mentor-payout-table {
-          width: 100%;
-          min-width: 570px;
-          border-collapse: collapse;
-        }
-
-        .mentor-dashboard .mentor-payout-table th,
-        .mentor-dashboard .mentor-payout-table td {
-          padding: 14px 12px;
-          text-align: left;
-          border-bottom: 1px solid #34352e;
-          font-size: 12px;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .mentor-payout-table th {
-          background: #22231e;
-          color: #d7b779;
-          font-weight: 700;
-        }
-
-        .mentor-dashboard .mentor-payout-table td {
-          color: #d8d3c6;
-        }
-
-        .mentor-dashboard .mentor-payout-table tr:last-child td {
-          border-bottom: 0;
-        }
-
-        .mentor-dashboard .mentor-bookings-title {
-          margin-bottom: 18px;
-        }
-
-        .mentor-dashboard .mentor-filter-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 9px;
-          margin: 0 0 22px;
-        }
-
-        .mentor-dashboard .mentor-filter {
-          padding: 9px 12px;
-          border: 1px solid #424033;
-          border-radius: 8px;
-          background: #1b1c18;
-          color: #c5c1b6;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .mentor-dashboard .mentor-filter.active {
-          background: #d7b779;
-          border-color: #d7b779;
-          color: #171610;
-        }
-
-        .mentor-dashboard .mentor-filter-count {
-          margin-left: 5px;
-          opacity: .8;
-        }
-
-        .mentor-dashboard .mentor-bookings-list {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 15px;
-        }
-
-        .mentor-dashboard .mentor-booking-card {
-          min-width: 0;
-          padding: 20px;
-          background: #1b1c18;
-          border: 1px solid #393a32;
-          border-radius: 13px;
-        }
-
-        .mentor-dashboard .mentor-booking-top {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 12px;
-        }
-
-        .mentor-dashboard .mentor-booking-top h3 {
-          margin: 0 0 6px;
-          color: #f4f1eb;
-          font-size: 17px;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .mentor-booking-top p {
-          margin: 0;
-          color: #aaa99f;
-          font-size: 12px;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .booking-status {
-          display: inline-block;
-          flex-shrink: 0;
-          padding: 6px 9px;
-          border: 1px solid #424033;
-          border-radius: 20px;
-          background: #25251f;
-          color: #d8d3c6;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .mentor-dashboard .status-confirmed {
-          border-color: #65563a;
-          background: #30291d;
-          color: #e7c98b;
-        }
-
-        .mentor-dashboard .status-completed {
-          border-color: #536347;
-          background: #20291e;
-          color: #b6d4a5;
-        }
-
-        .mentor-dashboard .status-expired,
-        .mentor-dashboard .status-cancelled {
-          border-color: #60413b;
-          background: #30201e;
-          color: #e5a69c;
-        }
-
-        .mentor-dashboard .status-pending_payment {
-          border-color: #55564d;
-          color: #d8d3c6;
-        }
-
-        .mentor-dashboard .mentor-booking-details {
-          margin: 18px 0;
-          padding: 14px 0;
-          border-top: 1px solid #34352e;
-          border-bottom: 1px solid #34352e;
-        }
-
-        .mentor-dashboard .mentor-booking-details p {
-          margin: 9px 0;
-          color: #b7b7ae;
-          font-size: 12px;
-          line-height: 1.6;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .mentor-booking-details strong {
-          color: #e7e3d8;
-        }
-
-        .mentor-dashboard .mentor-booking-action p {
-          color: #aaa99f;
-          font-size: 12px;
-          line-height: 1.7;
-        }
-
-        .mentor-dashboard .mentor-message {
-          padding: 12px 14px;
-          margin: 16px 0;
-          border-radius: 9px;
-          font-size: 13px;
-          line-height: 1.7;
-          overflow-wrap: anywhere;
-        }
-
-        .mentor-dashboard .mentor-message.error {
-          background: #30201e;
-          border: 1px solid #60413b;
-          color: #ffb6ab;
-        }
-
-        .mentor-dashboard .mentor-message.success {
-          background: #20291e;
-          border: 1px solid #536347;
-          color: #c6e4b8;
-        }
-
-        .mentor-dashboard .mentor-empty-state {
-          padding: 28px 18px;
-          border: 1px dashed #424033;
-          border-radius: 12px;
-          text-align: center;
-          color: #aaa99f;
-          line-height: 1.8;
-        }
-
-        .mentor-dashboard .mentor-back-button {
-          margin-top: 30px;
-        }
-
-        @media (max-width: 850px) {
-          .mentor-dashboard .mentor-stats {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-
-          .mentor-dashboard .mentor-earnings-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .mentor-dashboard .mentor-bookings-list {
-            grid-template-columns: minmax(0, 1fr);
-          }
-        }
-
-        @media (max-width: 480px) {
-          .mentor-dashboard {
-            padding: 18px 10px 36px;
-          }
-
-          .mentor-dashboard .mentor-dashboard-card {
-            padding: 18px 13px;
-            border-radius: 14px;
-          }
-
-          .mentor-dashboard .mentor-stats {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 9px;
-            margin: 20px 0 28px;
-          }
-
-          .mentor-dashboard .mentor-stat {
-            padding: 13px;
-          }
-
-          .mentor-dashboard .mentor-stat h2 {
-            font-size: 25px;
-          }
-
-          .mentor-dashboard .mentor-earning-card {
-            padding: 13px 10px;
-          }
-
-          .mentor-dashboard .mentor-earning-card strong {
-            font-size: 18px;
-          }
-
-          .mentor-dashboard .mentor-booking-card {
-            padding: 15px 12px;
-          }
-
-          .mentor-dashboard .mentor-booking-top {
-            flex-wrap: wrap;
-          }
-        }
-      `}</style>
-
-      <section className="auth-card mentor-dashboard-card">
-        <header className="mentor-dashboard-header">
-          <div>
-            <p className="eyebrow">THRONE8 MENTOR PORTAL</p>
-            <h1>Mentor Dashboard</h1>
-            <p>Welcome, {user?.name || "Mentor"}!</p>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={handleLogout}
-          >
-            Logout
+    <div className="mentor-page">
+      <style>{styles}</style>
+
+      <nav className="mentor-nav">
+        <Link to="/" className="mentor-brand">THRONE8</Link>
+
+        <div className="mentor-nav-links">
+          <Link to="/">Home</Link>
+          <Link to="/mentor-dashboard">Dashboard</Link>
+          <button className="mentor-logout" onClick={handleLogout}>
+            Logout ↗
           </button>
-        </header>
+        </div>
+      </nav>
 
-        {success && (
-          <p className="mentor-message success" role="status">
-            {success}
+      <main className="mentor-main">
+        <section className="mentor-hero">
+          <div className="mentor-eyebrow">Mentor Workspace</div>
+          <h1>Welcome back, {displayName}!</h1>
+          <p>
+            Manage your mentorship sessions, track your earnings, and keep
+            your student appointments organized — all from one place.
           </p>
-        )}
-
-        {error && (
-          <div className="mentor-message error" role="alert">
-            {error}
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => {
-                setError("");
-                fetchBookings();
-              }}
-              style={{ marginLeft: 12 }}
-            >
-              Retry Bookings
-            </button>
-          </div>
-        )}
-
-        <section className="mentor-stats" aria-label="Booking summary">
-          {[
-            ["Total Bookings", bookings.length],
-            ["Confirmed", counts.UPCOMING + counts.NEEDS_COMPLETION],
-            ["Pending Payment", counts.PENDING_PAYMENT],
-            ["Completed", counts.COMPLETED],
-            ["Expired", counts.EXPIRED],
-          ].map(([label, value]) => (
-            <article className="mentor-stat" key={label}>
-              <span>{label}</span>
-              <h2>{value}</h2>
-            </article>
-          ))}
         </section>
 
-        <section className="mentor-earnings-section">
-          <div className="mentor-section-heading">
+        {error && <div className="mentor-error">{error}</div>}
+        {success && <div className="mentor-success">{success}</div>}
+
+        <section className="mentor-stats">
+          <div className="mentor-stat">
+            <div className="mentor-stat-label">Total Bookings</div>
+            <div className="mentor-stat-value">
+              {loading ? "—" : totalBookings}
+            </div>
+            <div className="mentor-stat-note">All your student sessions</div>
+          </div>
+
+          <div className="mentor-stat">
+            <div className="mentor-stat-label">Pending Requests</div>
+            <div className="mentor-stat-value">
+              {loading ? "—" : pendingBookings}
+            </div>
+            <div className="mentor-stat-note">Awaiting your attention</div>
+          </div>
+
+          <div className="mentor-stat">
+            <div className="mentor-stat-label">Completed Sessions</div>
+            <div className="mentor-stat-value">
+              {loading ? "—" : completedBookings}
+            </div>
+            <div className="mentor-stat-note">Successfully completed</div>
+          </div>
+
+          <div className="mentor-stat">
+            <div className="mentor-stat-label">Total Earnings</div>
+            <div className="mentor-stat-value">
+              {loading ? "—" : formatCurrency(earningsAmount)}
+            </div>
+            <div className="mentor-stat-note">Based on your earnings API</div>
+          </div>
+        </section>
+
+        <section className="mentor-panel">
+          <div className="mentor-panel-head">
             <div>
-              <h2>My Earnings</h2>
-              <p>
-                Track completed-session earnings and payout progress.
-              </p>
+              <h3>Student Bookings</h3>
+              <p>Review your sessions and update their completion status.</p>
             </div>
 
             <button
-              type="button"
-              className="btn btn-outline"
-              disabled={loading || earningsLoading}
-              onClick={refreshDashboard}
+              className="mentor-refresh"
+              onClick={loadDashboard}
+              disabled={loading}
             >
-              {loading || earningsLoading
-                ? "Refreshing..."
-                : "Refresh Dashboard"}
+              {loading ? "Refreshing..." : "↻ Refresh"}
             </button>
           </div>
 
-          {earningsError && (
-            <div className="mentor-message error" role="alert">
-              {earningsError}
+          <div className="mentor-filters">
+            {FILTERS.map((item) => (
               <button
-                type="button"
-                className="btn btn-outline"
-                onClick={fetchEarnings}
-                style={{ marginLeft: 12 }}
+                key={item}
+                className={`mentor-filter ${filter === item ? "active" : ""}`}
+                onClick={() => setFilter(item)}
               >
-                Retry Earnings
-              </button>
-            </div>
-          )}
-
-          {earningsLoading && <p>Loading earnings...</p>}
-
-          {!earningsLoading && !earningsError && earnings && (
-            <>
-              <div className="mentor-earnings-grid">
-                {earningCards.map((card) => (
-                  <article
-                    className={`mentor-earning-card ${
-                      card.type || ""
-                    }`}
-                    key={card.label}
-                  >
-                    <span>{card.label}</span>
-                    <strong>{formatPrice(card.amount)}</strong>
-                    <small>{card.detail}</small>
-                  </article>
-                ))}
-              </div>
-
-              <p className="mentor-finance-note">
-                Earnings are calculated from completed sessions.
-                Payout eligibility starts 15 calendar days after
-                completion. Eligibility does not mean payment has
-                been made.
-              </p>
-
-              <h2 style={{ marginTop: 28, fontSize: 20 }}>
-                Payout History
-              </h2>
-
-              {payoutHistory.length === 0 ? (
-                <div className="mentor-empty-state">
-                  <p>No payout records found yet.</p>
-                  <p>
-                    Your payout records will appear here when available.
-                  </p>
-                </div>
-              ) : (
-                <div className="mentor-table-wrap">
-                  <table className="mentor-payout-table">
-                    <thead>
-                      <tr>
-                        <th>Payout ID</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Paid At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {payoutHistory.map((payout, index) => (
-                        <tr
-                          key={payout._id || payout.id || index}
-                        >
-                          <td>{payout._id || payout.id || "—"}</td>
-                          <td>{formatPrice(payout.amountPaise)}</td>
-                          <td>{payout.status || "UNKNOWN"}</td>
-                          <td>
-                            {payout.createdAt
-                              ? formatDate(payout.createdAt)
-                              : "—"}
-                          </td>
-                          <td>
-                            {payout.paidAt
-                              ? formatDate(payout.paidAt)
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {!earningsLoading && !earningsError && !earnings && (
-            <div className="mentor-empty-state">
-              Earnings data is not available.
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={fetchEarnings}
-                style={{ marginLeft: 12 }}
-              >
-                Try Again
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div className="mentor-section-heading" style={{ marginBottom: 20 }}>
-            <div>
-              <h2 className="mentor-bookings-title">
-                My Session Bookings
-              </h2>
-              <p style={{ color: "#aaa99f", fontSize: 13, marginTop: 6 }}>
-                Manage your sessions and track booking status.
-              </p>
-            </div>
-          </div>
-
-          <div className="mentor-filter-list" aria-label="Filter bookings">
-            {FILTERS.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                className={`mentor-filter ${
-                  activeFilter === filter.value ? "active" : ""
-                }`}
-                aria-pressed={activeFilter === filter.value}
-                onClick={() => setActiveFilter(filter.value)}
-              >
-                {filter.label}
-                <span className="mentor-filter-count">
-                  {counts[filter.value]}
-                </span>
+                {item}
+                {item === "All" ? ` (${bookings.length})` : ""}
               </button>
             ))}
           </div>
 
-          {loading && <p>Loading bookings...</p>}
-
-          {!loading && !error && bookings.length === 0 && (
-            <div className="mentor-empty-state">
-              No bookings found yet.
-            </div>
-          )}
-
-          {!loading && bookings.length > 0 && filteredBookings.length === 0 && (
-            <div className="mentor-empty-state">
-              No sessions in this category.
-              <p>Choose another filter to view your bookings.</p>
-            </div>
-          )}
-
-          {!loading && filteredBookings.length > 0 && (
-            <div className="mentor-bookings-list">
-              {filteredBookings.map((booking) => {
-                const isConfirmed = booking.status === "CONFIRMED";
-
-                const sessionEnded =
-                  booking.slotEnd &&
-                  new Date(booking.slotEnd).getTime() <= Date.now();
-
-                const isCompleting = completingId === booking._id;
+          <div className="mentor-bookings">
+            {loading ? (
+              <div className="mentor-empty">Loading your bookings...</div>
+            ) : filteredBookings.length === 0 ? (
+              <div className="mentor-empty">
+                <div style={{ fontSize: 30, marginBottom: 12 }}>▤</div>
+                <strong>No bookings found</strong>
+                <div>
+                  {filter === "All"
+                    ? "Your student bookings will appear here when available."
+                    : `There are no ${filter.toLowerCase()} bookings right now.`}
+                </div>
+              </div>
+            ) : (
+              filteredBookings.map((booking, index) => {
+                const bookingId = getBookingId(booking);
+                const status = getStatus(booking);
+                const canComplete = isCompleteAllowed(booking);
 
                 return (
                   <article
-                    className="mentor-booking-card"
-                    key={booking._id}
+                    className="mentor-booking"
+                    key={bookingId || `${getStudentName(booking)}-${index}`}
                   >
                     <div className="mentor-booking-top">
                       <div>
-                        <h3>
-                          {booking.studentId?.name || "Student"}
-                        </h3>
-                        <p>
-                          {booking.studentId?.email ||
-                            "Email unavailable"}
-                        </p>
+                        <h4>{getStudentName(booking)}</h4>
+                        <div className="mentor-booking-sub">
+                          Booking ID: {bookingId || "Not available"}
+                        </div>
                       </div>
 
-                      <span
-                        className={`booking-status status-${(
-                          booking.status || ""
-                        ).toLowerCase()}`}
-                      >
-                        {(booking.status || "UNKNOWN").replace(
-                          /_/g,
-                          " "
-                        )}
+                      <span className={`mentor-status ${status}`}>
+                        {status}
                       </span>
                     </div>
 
                     <div className="mentor-booking-details">
-                      <p>
-                        <strong>Start:</strong>{" "}
-                        {formatDate(booking.slotStart)}
-                      </p>
-                      <p>
-                        <strong>End:</strong>{" "}
-                        {formatDate(booking.slotEnd)}
-                      </p>
-                      <p>
-                        <strong>Session Fee:</strong>{" "}
-                        {formatPrice(booking.pricePaise)}
-                      </p>
-                      <p>
-                        <strong>Booking ID:</strong>{" "}
-                        {booking._id}
-                      </p>
+                      <div className="mentor-detail-row">
+                        <span>Session date</span>
+                        <span>{getDate(booking)}</span>
+                      </div>
 
-                      {booking.completedAt && (
-                        <p>
-                          <strong>Completed At:</strong>{" "}
-                          {formatDate(booking.completedAt)}
-                        </p>
-                      )}
+                      <div className="mentor-detail-row">
+                        <span>Session time</span>
+                        <span>{getTime(booking)}</span>
+                      </div>
 
-                      {booking.payoutEligibleAt && (
-                        <p>
-                          <strong>Payout Eligible At:</strong>{" "}
-                          {formatDate(booking.payoutEligibleAt)}
-                        </p>
-                      )}
+                      <div className="mentor-detail-row">
+                        <span>Session amount</span>
+                        <span>{formatCurrency(getAmount(booking))}</span>
+                      </div>
+
+                      <div className="mentor-detail-row">
+                        <span>Payment status</span>
+                        <span>
+                          {booking?.paymentStatus ||
+                            booking?.payment?.status ||
+                            "Not specified"}
+                        </span>
+                      </div>
                     </div>
 
-                    {isConfirmed && (
-                      <div className="mentor-booking-action">
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={!sessionEnded || isCompleting}
-                          onClick={() => handleCompleteSession(booking)}
-                        >
-                          {isCompleting
-                            ? "Completing..."
-                            : !sessionEnded
-                              ? "Session Not Ended"
-                              : "Complete Session"}
-                        </button>
-
-                        {!sessionEnded && (
-                          <p>
-                            Session completion is available after{" "}
-                            {formatDate(booking.slotEnd)}.
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {booking.status === "COMPLETED" && (
-                      <p className="mentor-message success">
-                        Session completed successfully.
-                      </p>
+                    {["completed", "complete"].includes(status) ? (
+                      <button className="mentor-complete-btn" disabled>
+                        ✓ Session Completed
+                      </button>
+                    ) : (
+                      <button
+                        className="mentor-complete-btn"
+                        disabled={!canComplete || completingId === String(bookingId)}
+                        onClick={() => handleComplete(booking)}
+                        title={
+                          canComplete
+                            ? "Mark this session as completed"
+                            : "This option becomes available after the session end time"
+                        }
+                      >
+                        {completingId === String(bookingId)
+                          ? "Completing..."
+                          : canComplete
+                          ? "✓ Mark Session Complete"
+                          : "Complete After Session Ends"}
+                      </button>
                     )}
                   </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        <section className="mentor-panel">
+          <div className="mentor-panel-head">
+            <div>
+              <h3>Earnings & Payout History</h3>
+              <p>Review your available earnings and recent payout records.</p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="mentor-empty">Loading earnings...</div>
+          ) : payouts.length === 0 ? (
+            <div className="mentor-empty">
+              No payout history available yet.
+            </div>
+          ) : (
+            <div className="mentor-payout-list">
+              {payouts.map((payout, index) => {
+                const payoutId = payout?._id || payout?.id || index;
+                const payoutStatus =
+                  payout?.status || payout?.payoutStatus || "pending";
+
+                return (
+                  <div className="mentor-payout" key={payoutId}>
+                    <div>
+                      <strong>
+                        {payout?.reference ||
+                          payout?.transactionId ||
+                          payout?.description ||
+                          `Payout #${index + 1}`}
+                      </strong>
+                      <small>
+                        {getDate(payout)}
+                      </small>
+                    </div>
+
+                    <div>
+                      <div className="mentor-payout-amount">
+                        {formatCurrency(getAmount(payout))}
+                      </div>
+                      <div className="mentor-payout-status">
+                        {payoutStatus}
+                      </div>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           )}
         </section>
+      </main>
 
-        <button
-          type="button"
-          className="btn btn-outline mentor-back-button"
-          onClick={() => navigate("/")}
-        >
-          Back to Home
-        </button>
-      </section>
-    </main>
+      <footer className="mentor-footer">
+        <strong>THRONE8</strong>
+        <div>Empowering your journey through mentorship.</div>
+        <div>© {new Date().getFullYear()} THRONE8. All rights reserved.</div>
+      </footer>
+    </div>
   );
 }
-
-export default MentorDashboard;

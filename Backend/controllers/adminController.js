@@ -1,4 +1,3 @@
-
 const User = require("../models/User");
 const Mentor = require("../models/Mentor");
 const Booking = require("../models/Booking");

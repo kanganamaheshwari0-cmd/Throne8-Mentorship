@@ -1,4 +1,3 @@
-
 const crypto = require("crypto");
 
 const Booking = require("../models/Booking");
