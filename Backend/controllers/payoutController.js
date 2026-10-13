@@ -12,7 +12,7 @@ const getEligibilityDate = (completedAt) => {
   return eligibleAt;
 };
 
-// Validate financial ledger and captured payment.
+// Validate ledger, payment, and refund state before any payout action.
 const validateLedgerPayment = async (ledger, bookingId) => {
   if (
     !ledger ||
@@ -49,18 +49,42 @@ const validateLedgerPayment = async (ledger, bookingId) => {
     };
   }
 
+  // Check every payment associated with this booking.
   const payments = await Payment.find({ bookingId })
-    .select("_id bookingId status amountPaise")
+    .select(
+      "_id bookingId status amountPaise refundedAmountPaise refunds"
+    )
     .lean();
 
-  if (
-    payments.some((payment) =>
-      ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status)
-    )
-  ) {
+  // Any existing refund amount blocks payout until the financial
+  // state is reviewed and reconciled.
+  const refundBlockingStatuses = [
+    "PARTIALLY_REFUNDED",
+    "REFUNDED",
+  ];
+
+  const refundInProgressOrCompleted = payments.some((payment) => {
+    const refunds = Array.isArray(payment.refunds)
+      ? payment.refunds
+      : [];
+
+    const hasActiveOrCompletedRefund = refunds.some((refund) =>
+      ["PENDING", "PROCESSED"].includes(refund.status)
+    );
+
+    return (
+      refundBlockingStatuses.includes(payment.status) ||
+      (Number.isSafeInteger(payment.refundedAmountPaise) &&
+        payment.refundedAmountPaise > 0) ||
+      hasActiveOrCompletedRefund
+    );
+  });
+
+  if (refundInProgressOrCompleted) {
     return {
       valid: false,
-      reason: "A refund exists for this booking",
+      reason:
+        "Refund pending or completed for this booking; payout is blocked",
     };
   }
 
@@ -88,6 +112,48 @@ const validateLedgerPayment = async (ledger, bookingId) => {
   }
 
   return { valid: true };
+};
+
+// Fetch the latest confirmed ledger and recheck payment/refund state.
+const validateBookingForPayout = async (booking) => {
+  if (
+    !booking ||
+    booking.status !== "COMPLETED" ||
+    !booking.completedAt
+  ) {
+    return {
+      valid: false,
+      reason: "A completed booking is required",
+    };
+  }
+
+  const ledger = await FinancialLedger.findOne({
+    bookingId: booking._id,
+    status: "CONFIRMED",
+  }).lean();
+
+  if (
+    !ledger ||
+    !ledger.completedAt ||
+    new Date(ledger.completedAt).getTime() !==
+      new Date(booking.completedAt).getTime()
+  ) {
+    return {
+      valid: false,
+      reason: "A matching confirmed financial ledger is required",
+    };
+  }
+
+  const paymentCheck = await validateLedgerPayment(
+    ledger,
+    booking._id
+  );
+
+  if (!paymentCheck.valid) {
+    return paymentCheck;
+  }
+
+  return { valid: true, ledger };
 };
 
 // GET ALL PAYOUT RECORDS
@@ -177,8 +243,6 @@ const getAdminFinanceSummary = async (req, res) => {
         continue;
       }
 
-      const eligibleAt = getEligibilityDate(booking.completedAt);
-
       const paymentCheck = await validateLedgerPayment(
         ledger,
         booking._id
@@ -187,6 +251,8 @@ const getAdminFinanceSummary = async (req, res) => {
       if (!paymentCheck.valid) {
         continue;
       }
+
+      const eligibleAt = getEligibilityDate(booking.completedAt);
 
       completedSessions++;
       totalCompletedEarningsPaise += ledger.mentorEarningsPaise;
@@ -233,7 +299,7 @@ const getAdminFinanceSummary = async (req, res) => {
         payoutCancelledPaise: sumPayouts(["CANCELLED"]),
       },
       note:
-        "Amounts are in paise. Pending eligibility is not yet available for payout. Approval does not mean money has been transferred.",
+        "Amounts are in paise. Refund-blocked bookings are excluded from eligible earnings. Approval does not mean money has been transferred.",
     });
   } catch (error) {
     console.error("Admin finance summary error:", error);
@@ -342,11 +408,34 @@ const generateEligiblePayouts = async (req, res) => {
         continue;
       }
 
+      // Recheck the current booking, ledger and payment state immediately
+      // before creating a payout record.
+      const latestBooking = await Booking.findById(booking._id)
+        .select("_id mentorId status completedAt")
+        .lean();
+
+      const latestCheck = await validateBookingForPayout(latestBooking);
+
+      if (
+        !latestCheck.valid ||
+        latestCheck.ledger.mentorEarningsPaise !==
+          ledger.mentorEarningsPaise
+      ) {
+        skipped++;
+        results.push({
+          bookingId: booking._id,
+          reason: latestCheck.valid
+            ? "Ledger earnings changed; payout requires rechecking"
+            : latestCheck.reason,
+        });
+        continue;
+      }
+
       try {
         await Payout.create({
-          mentorId: booking.mentorId,
-          bookingId: booking._id,
-          amountPaise: ledger.mentorEarningsPaise,
+          mentorId: latestBooking.mentorId,
+          bookingId: latestBooking._id,
+          amountPaise: latestCheck.ledger.mentorEarningsPaise,
           currency: "INR",
           status: "PENDING",
           payoutEligibleAt: eligibleAt,
@@ -355,9 +444,9 @@ const generateEligiblePayouts = async (req, res) => {
         created++;
 
         results.push({
-          bookingId: booking._id,
+          bookingId: latestBooking._id,
           result: "PAYOUT_CREATED",
-          amountPaise: ledger.mentorEarningsPaise,
+          amountPaise: latestCheck.ledger.mentorEarningsPaise,
         });
       } catch (error) {
         if (error.code === 11000) {
@@ -424,33 +513,24 @@ const approvePayout = async (req, res) => {
 
     if (
       !booking ||
-      booking.status !== "COMPLETED" ||
-      !booking.completedAt ||
       booking.mentorId.toString() !== payout.mentorId.toString()
     ) {
       return res.status(409).json({
         success: false,
-        message: "Booking or mentor is not eligible for payout approval",
+        message: "Booking or mentor does not match the payout",
       });
     }
 
-    const ledger = await FinancialLedger.findOne({
-      bookingId: booking._id,
-      status: "CONFIRMED",
-    }).lean();
+    const validation = await validateBookingForPayout(booking);
 
-    if (
-      !ledger ||
-      !ledger.completedAt ||
-      new Date(ledger.completedAt).getTime() !==
-        new Date(booking.completedAt).getTime()
-    ) {
+    if (!validation.valid) {
       return res.status(409).json({
         success: false,
-        message: "A matching confirmed financial ledger is required",
+        message: validation.reason,
       });
     }
 
+    const ledger = validation.ledger;
     const eligibleAt = getEligibilityDate(ledger.completedAt);
 
     if (
@@ -480,18 +560,25 @@ const approvePayout = async (req, res) => {
       });
     }
 
-    const paymentCheck = await validateLedgerPayment(
-      ledger,
-      booking._id
+    // Re-read the ledger and payment state immediately before approval.
+    const finalValidation = await validateBookingForPayout(
+      await Booking.findById(booking._id)
     );
 
-    if (!paymentCheck.valid) {
+    if (
+      !finalValidation.valid ||
+      finalValidation.ledger.mentorEarningsPaise !== payout.amountPaise
+    ) {
       return res.status(409).json({
         success: false,
-        message: paymentCheck.reason,
+        message: finalValidation.valid
+          ? "Ledger earnings changed; payout requires review"
+          : finalValidation.reason,
       });
     }
 
+    // Atomic status transition prevents two admins from approving the
+    // same PENDING payout at the same time.
     const approvedPayout = await Payout.findOneAndUpdate(
       {
         _id: payout._id,

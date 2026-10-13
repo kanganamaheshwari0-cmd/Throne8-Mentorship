@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const bookingSchema = new mongoose.Schema(
@@ -87,6 +86,57 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // ---- Session completion review (mentor requests, admin verifies) ----
+    completionReviewStatus: {
+      type: String,
+      enum: ["NONE", "REQUESTED", "REJECTED", "VERIFIED"],
+      default: "NONE",
+      index: true,
+    },
+
+    completionRequestedAt: {
+      type: Date,
+      default: null,
+    },
+
+    completionRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    completionNote: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: null,
+    },
+
+    completionEvidenceUrl: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: null,
+    },
+
+    completionVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+
+    completionVerifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    completionRejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -101,6 +151,12 @@ bookingSchema.index({
 bookingSchema.index({
   status: 1,
   payoutEligibleAt: 1,
+});
+
+bookingSchema.index({
+  status: 1,
+  completionReviewStatus: 1,
+  completionRequestedAt: 1,
 });
 
 module.exports = mongoose.model("Booking", bookingSchema);

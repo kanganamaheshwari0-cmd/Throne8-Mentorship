@@ -1,12 +1,14 @@
-
 const crypto = require("crypto");
 const Razorpay = require("razorpay");
-
+const Refund = require("../models/Refund");
 const Payment = require("../models/Payment");
 const Booking = require("../models/Booking");
 const FinancialLedger = require("../models/FinancialLedger");
 const WebhookEvent = require("../models/WebhookEvent");
 const { recordWebhookEvent } = require("../services/webhookService");
+const {
+  tryRecordPaymentCaptured,
+} = require("../services/ledgerEntryService");
 
 const getRazorpayInstance = () => {
   if (
@@ -347,7 +349,6 @@ const handleRazorpayWebhook = async (req, res) => {
       });
     }
 
-    // Verify signature against the exact raw request bytes.
     const expectedSignature = crypto
       .createHmac("sha256", webhookSecret)
       .update(req.body)
@@ -364,10 +365,7 @@ const handleRazorpayWebhook = async (req, res) => {
 
     if (
       receivedSignature.length !== expectedSignature.length ||
-      !crypto.timingSafeEqual(
-        expectedSignature,
-        receivedSignature
-      )
+      !crypto.timingSafeEqual(expectedSignature, receivedSignature)
     ) {
       return res.status(400).json({
         success: false,
@@ -375,10 +373,9 @@ const handleRazorpayWebhook = async (req, res) => {
       });
     }
 
-    // Parse only after signature verification succeeds.
     const body = JSON.parse(req.body.toString("utf8"));
 
-    if (!body.event || typeof body.event !== "string") {
+    if (typeof body.event !== "string" || !body.event) {
       return res.status(400).json({
         success: false,
         message: "Webhook event type is missing",
@@ -397,25 +394,17 @@ const handleRazorpayWebhook = async (req, res) => {
       throw new Error("Webhook event record could not be loaded");
     }
 
-    if (recorded.duplicate) {
-      if (webhookEvent.status === "PROCESSED") {
-        return res.status(200).json({
-          success: true,
-          duplicate: true,
-          message: "Webhook event already processed",
-        });
-      }
-
-      if (webhookEvent.status === "PROCESSING") {
-        return res.status(200).json({
-          success: true,
-          duplicate: true,
-          message: "Webhook event is already processing",
-        });
-      }
+    if (
+      recorded.duplicate &&
+      ["PROCESSED", "PROCESSING"].includes(webhookEvent.status)
+    ) {
+      return res.status(200).json({
+        success: true,
+        duplicate: true,
+        message: "Webhook event already handled or processing",
+      });
     }
 
-    // Claim a new or previously failed event atomically.
     const claimedEvent = await WebhookEvent.findOneAndUpdate(
       {
         _id: webhookEvent._id,
@@ -440,7 +429,229 @@ const handleRazorpayWebhook = async (req, res) => {
 
     webhookEvent = claimedEvent;
 
-    // Ignore other event types safely.
+    // Handle completed or failed Razorpay refunds.
+    if (
+      body.event === "refund.processed" ||
+      body.event === "refund.failed"
+    ) {
+      const providerRefund = body.payload?.refund?.entity;
+
+      if (
+        !providerRefund ||
+        typeof providerRefund.id !== "string" ||
+        typeof providerRefund.payment_id !== "string" ||
+        !Number.isSafeInteger(providerRefund.amount) ||
+        providerRefund.amount <= 0
+      ) {
+        throw new Error("Refund webhook details are invalid");
+      }
+
+      const refundRecord = await Refund.findOne({
+        $or: [
+          { gatewayRefundId: providerRefund.id },
+          { "rawProviderRefs.id": providerRefund.id },
+        ],
+      });
+
+      if (!refundRecord) {
+        // Do not silently acknowledge an unmatched financial event.
+        throw new Error(
+          "Local refund record not found; refund reconciliation required"
+        );
+      }
+
+      const payment = await Payment.findById(refundRecord.paymentId);
+
+      if (
+        !payment ||
+        payment.gatewayPaymentId !== providerRefund.payment_id ||
+        refundRecord.amountPaise !== providerRefund.amount
+      ) {
+        throw new Error("Refund does not match the local payment record");
+      }
+
+      const booking = await Booking.findById(refundRecord.bookingId);
+
+      if (!booking) {
+        throw new Error("Refund booking was not found");
+      }
+
+      const ledger = await FinancialLedger.findOne({
+        bookingId: booking._id,
+        paymentId: payment._id,
+      });
+
+      if (!ledger) {
+        throw new Error("Refund financial ledger was not found");
+      }
+
+      if (body.event === "refund.processed") {
+        if (providerRefund.status !== "processed") {
+          throw new Error(
+            "Provider refund status is not confirmed as processed"
+          );
+        }
+
+        // Prevent the same refund from increasing the total twice.
+        const previousEntry = payment.refunds.find(
+          (item) => item.gatewayRefundId === providerRefund.id
+        );
+
+        const alreadyProcessed =
+          previousEntry?.status === "PROCESSED" ||
+          refundRecord.status === "PROCESSED";
+
+        if (!alreadyProcessed) {
+          const currentRefunded =
+            Number.isSafeInteger(payment.refundedAmountPaise)
+              ? payment.refundedAmountPaise
+              : 0;
+
+          const newRefunded =
+            currentRefunded + providerRefund.amount;
+
+          if (newRefunded > payment.amountPaise) {
+            throw new Error(
+              "Total refunds exceed the captured payment amount"
+            );
+          }
+
+          if (previousEntry) {
+            previousEntry.status = "PROCESSED";
+            previousEntry.processedAt = new Date();
+            previousEntry.amountPaise = providerRefund.amount;
+          } else {
+            payment.refunds.push({
+              gatewayRefundId: providerRefund.id,
+              amountPaise: providerRefund.amount,
+              status: "PROCESSED",
+              processedAt: new Date(),
+              rawProviderRefs: {
+                id: providerRefund.id,
+                payment_id: providerRefund.payment_id,
+                status: providerRefund.status,
+              },
+            });
+          }
+
+          payment.refundedAmountPaise = newRefunded;
+          payment.status =
+            newRefunded === payment.amountPaise
+              ? "REFUNDED"
+              : "PARTIALLY_REFUNDED";
+
+          await payment.save();
+        }
+
+        await Refund.updateOne(
+          { _id: refundRecord._id },
+          {
+            $set: {
+              status: "PROCESSED",
+              gatewayRefundId: providerRefund.id,
+              processedAt: refundRecord.processedAt || new Date(),
+              rawProviderRefs: {
+                id: providerRefund.id,
+                payment_id: providerRefund.payment_id,
+                status: providerRefund.status,
+              },
+              failureReason: null,
+            },
+          }
+        );
+
+        // A completed refund must never make this ledger payout-eligible.
+        await FinancialLedger.updateOne(
+          {
+            _id: ledger._id,
+            status: { $in: ["REFUND_PENDING", "REVIEW_REQUIRED", "REFUNDED"] },
+          },
+          {
+            $set: {
+              status:
+                payment.refundedAmountPaise >= payment.amountPaise
+                  ? "REFUNDED"
+                  : "REVIEW_REQUIRED",
+              notes:
+                payment.refundedAmountPaise >= payment.amountPaise
+                  ? "Full refund confirmed by verified Razorpay webhook"
+                  : "Refund processed; remaining financial balance requires review",
+            },
+          }
+        );
+      } else {
+        // A failed refund does not prove that money was returned.
+        // Keep the ledger blocked until the payment is reconciled.
+        if (providerRefund.status !== "failed") {
+          throw new Error(
+            "Provider refund status is not confirmed as failed"
+          );
+        }
+
+        await Refund.updateOne(
+          { _id: refundRecord._id },
+          {
+            $set: {
+              status: "FAILED",
+              gatewayRefundId: providerRefund.id,
+              failureReason: "Razorpay reported refund failure",
+              rawProviderRefs: {
+                id: providerRefund.id,
+                payment_id: providerRefund.payment_id,
+                status: providerRefund.status,
+              },
+            },
+          }
+        );
+
+        const existingEntry = payment.refunds.find(
+          (item) => item.gatewayRefundId === providerRefund.id
+        );
+
+        if (existingEntry && existingEntry.status !== "PROCESSED") {
+          existingEntry.status = "FAILED";
+          existingEntry.rawProviderRefs = {
+            id: providerRefund.id,
+            payment_id: providerRefund.payment_id,
+            status: providerRefund.status,
+          };
+          await payment.save();
+        }
+
+        await FinancialLedger.updateOne(
+          {
+            _id: ledger._id,
+            status: { $ne: "REFUNDED" },
+          },
+          {
+            $set: {
+              status: "REVIEW_REQUIRED",
+              notes:
+                "Razorpay reported refund failure; reconcile before allowing payout",
+            },
+          }
+        );
+      }
+
+      await WebhookEvent.updateOne(
+        { _id: webhookEvent._id, status: "PROCESSING" },
+        {
+          $set: {
+            status: "PROCESSED",
+            processedAt: new Date(),
+            errorMessage: null,
+          },
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Refund webhook processed",
+        refundId: refundRecord._id,
+      });
+    }
+
+    // Preserve the existing captured-payment workflow.
     if (body.event !== "payment.captured") {
       await WebhookEvent.updateOne(
         { _id: webhookEvent._id, status: "PROCESSING" },
@@ -492,10 +703,7 @@ const handleRazorpayWebhook = async (req, res) => {
       throw new Error("A different payment is already recorded");
     }
 
-    if (
-      payment.status !== "CREATED" &&
-      payment.status !== "CAPTURED"
-    ) {
+    if (!["CREATED", "CAPTURED"].includes(payment.status)) {
       throw new Error("Local payment is not eligible for capture");
     }
 
@@ -503,12 +711,10 @@ const handleRazorpayWebhook = async (req, res) => {
       payment.gatewayPaymentId = providerPayment.id;
       payment.status = "CAPTURED";
       payment.capturedAt = new Date();
-
       payment.rawProviderRefs = {
         orderId: providerPayment.order_id,
         paymentId: providerPayment.id,
       };
-
       await payment.save();
     }
 
@@ -518,8 +724,8 @@ const handleRazorpayWebhook = async (req, res) => {
       throw new Error("Matching booking was not found");
     }
 
-    // Reuse the existing financial ledger validation.
     await ensureFinancialLedger(booking, payment);
+    await tryRecordPaymentCaptured({ booking, payment });
 
     if (
       booking.status === "PENDING_PAYMENT" &&
@@ -531,9 +737,7 @@ const handleRazorpayWebhook = async (req, res) => {
           status: "PENDING_PAYMENT",
           holdExpiresAt: { $gt: new Date() },
         },
-        {
-          $set: { status: "CONFIRMED" },
-        },
+        { $set: { status: "CONFIRMED" } },
         { new: true }
       );
 
@@ -555,7 +759,7 @@ const handleRazorpayWebhook = async (req, res) => {
         await markLedgerForReview(
           booking._id,
           payment._id,
-          "Webhook captured payment but booking confirmation requires reconciliation."
+          "Captured payment requires booking reconciliation."
         );
       }
     } else if (
@@ -565,7 +769,7 @@ const handleRazorpayWebhook = async (req, res) => {
       await markLedgerForReview(
         booking._id,
         payment._id,
-        "Webhook captured payment but booking cannot be confirmed automatically. Reconciliation or refund review is required."
+        "Captured payment cannot confirm booking automatically; review required."
       );
     }
 
@@ -597,10 +801,7 @@ const handleRazorpayWebhook = async (req, res) => {
           },
         }
       ).catch((dbError) => {
-        console.error(
-          "Webhook event status update failed:",
-          dbError.message
-        );
+        console.error("Webhook event update failed:", dbError.message);
       });
     }
 
@@ -610,7 +811,6 @@ const handleRazorpayWebhook = async (req, res) => {
     });
   }
 };
-
 
 // VERIFY RAZORPAY PAYMENT
 const verifyRazorpayPayment = async (req, res) => {
@@ -742,6 +942,9 @@ const verifyRazorpayPayment = async (req, res) => {
 
     // Create or reuse the ledger after verifying capture.
     await ensureFinancialLedger(booking, payment);
+
+    // TOPIC 2: double-entry ledger lines (safe to call again, no duplicates)
+    await tryRecordPaymentCaptured({ booking, payment });
 
     // A completed booking must remain completed on a retry.
     if (booking.status === "COMPLETED") {
@@ -949,5 +1152,5 @@ module.exports = {
   getMyPayments,
   createRazorpayOrder,
   verifyRazorpayPayment,
-   handleRazorpayWebhook,
+  handleRazorpayWebhook,
 };

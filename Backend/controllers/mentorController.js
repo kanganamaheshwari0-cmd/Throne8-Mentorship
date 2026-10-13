@@ -1,5 +1,6 @@
 
 const Mentor = require("../models/Mentor");
+const Payment = require("../models/Payment");
 const Booking = require("../models/Booking");
 const Payout = require("../models/Payout");
 const FinancialLedger = require("../models/FinancialLedger");
@@ -20,7 +21,6 @@ const getAllMentors = async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch all mentors error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch mentors",
@@ -49,7 +49,6 @@ const getMyMentorProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch mentor profile error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch mentor profile",
@@ -130,7 +129,6 @@ const updateMyMentorProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Update mentor profile error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to update mentor profile",
@@ -166,10 +164,9 @@ const getMyMentorBookings = async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch mentor bookings error:", error.message);
-
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch mentor bookings",
+      message: "Failed to fetch mentors bookings",
     });
   }
 };
@@ -195,9 +192,6 @@ const getMyMentorEarnings = async (req, res) => {
       });
     }
 
-    const now = new Date();
-
-    // Fetch completed bookings for this mentor.
     const bookings = await Booking.find({
       mentorId: mentor._id,
       status: "COMPLETED",
@@ -206,8 +200,6 @@ const getMyMentorEarnings = async (req, res) => {
       .select("_id completedAt")
       .lean();
 
-    const bookingIds = bookings.map((booking) => booking._id);
-
     const bookingById = new Map(
       bookings.map((booking) => [
         booking._id.toString(),
@@ -215,98 +207,206 @@ const getMyMentorEarnings = async (req, res) => {
       ])
     );
 
-    // Only confirmed financial ledgers for completed bookings count.
-    const ledgers = await FinancialLedger.find({
-      bookingId: { $in: bookingIds },
-      status: "CONFIRMED",
-      completedAt: { $ne: null },
-    }).lean();
+    const bookingIds = bookings.map((booking) => booking._id);
 
-    // Reject mismatched completion timestamps and invalid amounts.
-    const validLedgers = ledgers.filter((ledger) => {
+    const [ledgers, payouts, payments] = await Promise.all([
+      FinancialLedger.find({
+        bookingId: { $in: bookingIds },
+        status: "CONFIRMED",
+        completedAt: { $ne: null },
+      }).lean(),
+
+      Payout.find({
+        mentorId: mentor._id,
+      })
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      Payment.find({
+        bookingId: { $in: bookingIds },
+      })
+        .select(
+          "_id bookingId status amountPaise refundedAmountPaise refunds"
+        )
+        .lean(),
+    ]);
+
+    const paymentsByBooking = new Map();
+
+    for (const payment of payments) {
+      const key = payment.bookingId.toString();
+
+      if (!paymentsByBooking.has(key)) {
+        paymentsByBooking.set(key, []);
+      }
+
+      paymentsByBooking.get(key).push(payment);
+    }
+
+    const payoutsByBooking = new Map();
+
+    for (const payout of payouts) {
+      const key = payout.bookingId.toString();
+
+      if (!payoutsByBooking.has(key)) {
+        payoutsByBooking.set(key, []);
+      }
+
+      payoutsByBooking.get(key).push(payout);
+    }
+
+    // Payout eligibility: completion + 15 UTC calendar days.
+    const getEligibilityDate = (completedAt) => {
+      const date = new Date(completedAt);
+      date.setUTCDate(date.getUTCDate() + 15);
+      return date;
+    };
+
+    const isPaymentRefundBlocked = (payment) => {
+      const refunds = Array.isArray(payment.refunds)
+        ? payment.refunds
+        : [];
+
+      return (
+        ["PARTIALLY_REFUNDED", "REFUNDED"].includes(
+          payment.status
+        ) ||
+        (Number.isSafeInteger(payment.refundedAmountPaise) &&
+          payment.refundedAmountPaise > 0) ||
+        refunds.some((refund) =>
+          ["PENDING", "PROCESSED"].includes(refund.status)
+        )
+      );
+    };
+
+    const validLedgers = [];
+
+    for (const ledger of ledgers) {
       const booking = bookingById.get(
         ledger.bookingId.toString()
       );
 
-      return (
-        booking &&
-        new Date(booking.completedAt).getTime() ===
-          new Date(ledger.completedAt).getTime() &&
-        Number.isSafeInteger(ledger.mentorEarningsPaise) &&
-        ledger.mentorEarningsPaise > 0 &&
-        ledger.payoutEligibleAt &&
-        !Number.isNaN(
-          new Date(ledger.payoutEligibleAt).getTime()
-        )
-      );
-    });
-
-    const payouts = await Payout.find({
-      mentorId: mentor._id,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const payoutByBookingId = new Map();
-
-    for (const payout of payouts) {
-      payoutByBookingId.set(
-        payout.bookingId.toString(),
-        payout
-      );
-    }
-
-    let totalCompletedEarningsPaise = 0;
-    let pendingEarningsPaise = 0;
-    let eligibleUnpaidEarningsPaise = 0;
-
-    for (const ledger of validLedgers) {
-      const earnings = ledger.mentorEarningsPaise;
-      const bookingId = ledger.bookingId.toString();
-
-      totalCompletedEarningsPaise += earnings;
-
-      const payout = payoutByBookingId.get(bookingId);
-
-      // Paid earnings must not appear again as unpaid earnings.
-      if (payout && payout.status === "PAID") {
+      if (!booking || !booking.completedAt || !ledger.completedAt) {
         continue;
       }
 
-      // Active payout records already represent these earnings.
       if (
-        payout &&
-        ["PENDING", "APPROVED", "PROCESSING"].includes(
-          payout.status
-        )
+        new Date(booking.completedAt).getTime() !==
+        new Date(ledger.completedAt).getTime()
       ) {
         continue;
       }
 
-      // FAILED and CANCELLED payouts can become eligible again,
-      // but only after rechecking the waiting period.
-      const eligibleAt = new Date(ledger.payoutEligibleAt);
+      const eligibleAt = getEligibilityDate(booking.completedAt);
 
-      if (eligibleAt <= now) {
-        eligibleUnpaidEarningsPaise += earnings;
+      if (
+        !ledger.payoutEligibleAt ||
+        new Date(ledger.payoutEligibleAt).getTime() !==
+          eligibleAt.getTime()
+      ) {
+        continue;
+      }
+
+      const paidPaise = ledger.studentPaidPaise;
+      const commissionPaise = ledger.platformCommissionPaise;
+      const mentorPaise = ledger.mentorEarningsPaise;
+      const rateBps = ledger.commissionRateBps;
+
+      if (
+        !Number.isSafeInteger(paidPaise) ||
+        paidPaise <= 0 ||
+        !Number.isSafeInteger(commissionPaise) ||
+        commissionPaise < 0 ||
+        !Number.isSafeInteger(mentorPaise) ||
+        mentorPaise <= 0 ||
+        !Number.isSafeInteger(rateBps) ||
+        rateBps < 0 ||
+        rateBps > 10000
+      ) {
+        continue;
+      }
+
+      const expectedCommission = Math.round(
+        (paidPaise * rateBps) / 10000
+      );
+
+      if (
+        commissionPaise !== expectedCommission ||
+        commissionPaise + mentorPaise !== paidPaise
+      ) {
+        continue;
+      }
+
+      const bookingPayments =
+        paymentsByBooking.get(booking._id.toString()) || [];
+
+      const linkedPayment = bookingPayments.find(
+        (payment) =>
+          payment._id.toString() ===
+          ledger.paymentId?.toString()
+      );
+
+      if (
+        !linkedPayment ||
+        linkedPayment.status !== "CAPTURED" ||
+        linkedPayment.amountPaise !== paidPaise ||
+        bookingPayments.some(isPaymentRefundBlocked)
+      ) {
+        continue;
+      }
+
+      validLedgers.push({
+        booking,
+        eligibleAt,
+        mentorPaise,
+      });
+    }
+
+    const now = new Date();
+
+    let totalCompletedEarningsPaise = 0;
+    let pendingEarningsPaise = 0;
+    let eligibleUnpaidEarningsPaise = 0;
+    let completedSessions = 0;
+
+    for (const item of validLedgers) {
+      const { booking, eligibleAt, mentorPaise } = item;
+
+      totalCompletedEarningsPaise += mentorPaise;
+      completedSessions++;
+
+      const bookingPayouts =
+        payoutsByBooking.get(booking._id.toString()) || [];
+
+      // Existing payout records must not be counted as unpaid.
+      // A failed/cancelled payout needs a controlled retry flow.
+      if (bookingPayouts.length > 0) {
+        continue;
+      }
+
+      if (eligibleAt > now) {
+        pendingEarningsPaise += mentorPaise;
       } else {
-        pendingEarningsPaise += earnings;
+        eligibleUnpaidEarningsPaise += mentorPaise;
       }
     }
 
     const sumPayouts = (statuses) =>
       payouts
         .filter((payout) => statuses.includes(payout.status))
-        .reduce(
-          (total, payout) => total + payout.amountPaise,
-          0
-        );
+        .reduce((total, payout) => {
+          const amount = payout.amountPaise;
+
+          return Number.isSafeInteger(amount) && amount > 0
+            ? total + amount
+            : total;
+        }, 0);
 
     return res.status(200).json({
       success: true,
       currency: "INR",
       summary: {
-        completedSessions: validLedgers.length,
+        completedSessions,
         totalCompletedEarningsPaise,
         pendingEarningsPaise,
         eligibleUnpaidEarningsPaise,
@@ -319,7 +419,7 @@ const getMyMentorEarnings = async (req, res) => {
       },
       payoutHistory: payouts,
       note:
-        "Amounts are in paise. Earnings include confirmed financial ledgers for completed sessions. Failed and cancelled payouts may become eligible again after the waiting period, subject to admin review. Eligibility does not mean payout has been paid.",
+        "Earnings include validated captured payments and confirmed ledgers for completed sessions. Refund-affected or inconsistent records are excluded. Payout eligibility begins 15 UTC calendar days after completion. Existing payout records are not counted again as unpaid earnings.",
     });
   } catch (error) {
     console.error("Get mentor earnings error:", error);

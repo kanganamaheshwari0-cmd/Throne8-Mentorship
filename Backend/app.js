@@ -1,7 +1,7 @@
 
 const express = require("express");
 const cors = require("cors");
-
+const requestId = require("./middleware/requestId");
 const paymentRoutes = require("./routes/paymentRoutes");
 const authRoutes = require("./routes/authRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
@@ -14,6 +14,7 @@ const {
 } = require("./controllers/paymentController");
 
 const app = express();
+app.use(requestId);
 
 // CORS
 app.use(

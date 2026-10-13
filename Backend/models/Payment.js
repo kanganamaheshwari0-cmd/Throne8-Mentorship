@@ -1,6 +1,43 @@
 
 const mongoose = require("mongoose");
 
+const refundSchema = new mongoose.Schema(
+  {
+    gatewayRefundId: {
+      type: String,
+      required: true,
+    },
+
+    amountPaise: {
+      type: Number,
+      required: true,
+      min: 1,
+      validate: {
+        validator: Number.isSafeInteger,
+        message: "Refund amount must be a whole number of paise.",
+      },
+    },
+
+    status: {
+      type: String,
+      enum: ["PENDING", "PROCESSED", "FAILED"],
+      default: "PENDING",
+      required: true,
+    },
+
+    processedAt: {
+      type: Date,
+      default: null,
+    },
+
+    rawProviderRefs: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+  },
+  { timestamps: true }
+);
+
 const paymentSchema = new mongoose.Schema(
   {
     bookingId: {
@@ -32,6 +69,10 @@ const paymentSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
+      validate: {
+        validator: Number.isSafeInteger,
+        message: "Payment amount must be a whole number of paise.",
+      },
     },
 
     currency: {
@@ -59,14 +100,27 @@ const paymentSchema = new mongoose.Schema(
       default: null,
     },
 
+    refundedAmountPaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isSafeInteger,
+        message: "Refunded amount must be a whole number of paise.",
+      },
+    },
+
+    refunds: {
+      type: [refundSchema],
+      default: [],
+    },
+
     rawProviderRefs: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 paymentSchema.index(
@@ -78,5 +132,12 @@ paymentSchema.index(
     },
   }
 );
+
+// Prevent the same Razorpay refund ID from being stored twice
+// within a single payment document.
+paymentSchema.path("refunds").validate(function (refunds) {
+  const refundIds = refunds.map((refund) => refund.gatewayRefundId);
+  return new Set(refundIds).size === refundIds.length;
+}, "Duplicate refund ID found for this payment.");
 
 module.exports = mongoose.model("Payment", paymentSchema);
