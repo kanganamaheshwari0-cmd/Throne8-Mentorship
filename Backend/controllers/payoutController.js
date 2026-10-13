@@ -1,17 +1,18 @@
+
 const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const Payout = require("../models/Payout");
 const FinancialLedger = require("../models/FinancialLedger");
 
-// Business rule: completion time + 15 calendar days in UTC.
+// Completion time + 15 calendar days in UTC.
 const getEligibilityDate = (completedAt) => {
   const eligibleAt = new Date(completedAt);
   eligibleAt.setUTCDate(eligibleAt.getUTCDate() + 15);
   return eligibleAt;
 };
 
-// Validate the captured payment against its financial ledger.
+// Validate financial ledger and captured payment.
 const validateLedgerPayment = async (ledger, bookingId) => {
   if (
     !ledger ||
@@ -33,7 +34,6 @@ const validateLedgerPayment = async (ledger, bookingId) => {
     };
   }
 
-  // Validate that the ledger's financial breakdown is consistent.
   const expectedCommission = Math.round(
     (ledger.studentPaidPaise * ledger.commissionRateBps) / 10000
   );
@@ -53,11 +53,11 @@ const validateLedgerPayment = async (ledger, bookingId) => {
     .select("_id bookingId status amountPaise")
     .lean();
 
-  const hasRefund = payments.some((payment) =>
-    ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status)
-  );
-
-  if (hasRefund) {
+  if (
+    payments.some((payment) =>
+      ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status)
+    )
+  ) {
     return {
       valid: false,
       reason: "A refund exists for this booking",
@@ -121,6 +121,130 @@ const getAdminPayouts = async (req, res) => {
   }
 };
 
+// GET ADMIN FINANCE SUMMARY
+const getAdminFinanceSummary = async (req, res) => {
+  try {
+    const now = new Date();
+
+    const bookings = await Booking.find({
+      status: "COMPLETED",
+      completedAt: { $ne: null },
+    })
+      .select("_id mentorId status completedAt")
+      .lean();
+
+    const bookingMap = new Map(
+      bookings.map((booking) => [
+        booking._id.toString(),
+        booking,
+      ])
+    );
+
+    const bookingIds = bookings.map((booking) => booking._id);
+
+    const [ledgers, payouts] = await Promise.all([
+      FinancialLedger.find({
+        bookingId: { $in: bookingIds },
+        status: "CONFIRMED",
+        completedAt: { $ne: null },
+      }).lean(),
+      Payout.find({}).lean(),
+    ]);
+
+    const payoutMap = new Map();
+
+    for (const payout of payouts) {
+      payoutMap.set(payout.bookingId.toString(), payout);
+    }
+
+    let completedSessions = 0;
+    let totalCompletedEarningsPaise = 0;
+    let pendingEligibilityPaise = 0;
+    let eligibleUnpaidPaise = 0;
+
+    for (const ledger of ledgers) {
+      const booking = bookingMap.get(ledger.bookingId.toString());
+
+      if (
+        !booking ||
+        !booking.completedAt ||
+        !ledger.completedAt ||
+        new Date(booking.completedAt).getTime() !==
+          new Date(ledger.completedAt).getTime() ||
+        !Number.isSafeInteger(ledger.mentorEarningsPaise) ||
+        ledger.mentorEarningsPaise <= 0
+      ) {
+        continue;
+      }
+
+      const eligibleAt = getEligibilityDate(booking.completedAt);
+
+      const paymentCheck = await validateLedgerPayment(
+        ledger,
+        booking._id
+      );
+
+      if (!paymentCheck.valid) {
+        continue;
+      }
+
+      completedSessions++;
+      totalCompletedEarningsPaise += ledger.mentorEarningsPaise;
+
+      const payout = payoutMap.get(booking._id.toString());
+
+      if (
+        payout &&
+        ["PENDING", "APPROVED", "PROCESSING", "PAID"].includes(
+          payout.status
+        )
+      ) {
+        continue;
+      }
+
+      if (eligibleAt > now) {
+        pendingEligibilityPaise += ledger.mentorEarningsPaise;
+      } else {
+        eligibleUnpaidPaise += ledger.mentorEarningsPaise;
+      }
+    }
+
+    const sumPayouts = (statuses) =>
+      payouts
+        .filter((payout) => statuses.includes(payout.status))
+        .reduce(
+          (total, payout) => total + Number(payout.amountPaise || 0),
+          0
+        );
+
+    return res.status(200).json({
+      success: true,
+      currency: "INR",
+      summary: {
+        completedSessions,
+        totalCompletedEarningsPaise,
+        pendingEligibilityPaise,
+        eligibleUnpaidPaise,
+        payoutPendingPaise: sumPayouts(["PENDING"]),
+        payoutApprovedPaise: sumPayouts(["APPROVED"]),
+        payoutProcessingPaise: sumPayouts(["PROCESSING"]),
+        totalPaidPaise: sumPayouts(["PAID"]),
+        payoutFailedPaise: sumPayouts(["FAILED"]),
+        payoutCancelledPaise: sumPayouts(["CANCELLED"]),
+      },
+      note:
+        "Amounts are in paise. Pending eligibility is not yet available for payout. Approval does not mean money has been transferred.",
+    });
+  } catch (error) {
+    console.error("Admin finance summary error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch admin finance summary",
+    });
+  }
+};
+
 // GENERATE PAYOUT RECORDS FROM ELIGIBLE FINANCIAL LEDGERS
 const generateEligiblePayouts = async (req, res) => {
   try {
@@ -143,125 +267,109 @@ const generateEligiblePayouts = async (req, res) => {
     for (const ledger of ledgers) {
       const booking = ledger.bookingId;
 
+      if (
+        !booking ||
+        booking.status !== "COMPLETED" ||
+        !booking.completedAt ||
+        !ledger.completedAt
+      ) {
+        skipped++;
+        results.push({
+          bookingId: booking?._id || ledger.bookingId,
+          reason: "Completed booking and ledger are required",
+        });
+        continue;
+      }
+
+      if (
+        new Date(ledger.completedAt).getTime() !==
+        new Date(booking.completedAt).getTime()
+      ) {
+        skipped++;
+        results.push({
+          bookingId: booking._id,
+          reason: "Booking and ledger completion times do not match",
+        });
+        continue;
+      }
+
+      const eligibleAt = getEligibilityDate(booking.completedAt);
+
+      if (
+        !ledger.payoutEligibleAt ||
+        new Date(ledger.payoutEligibleAt).getTime() !==
+          eligibleAt.getTime()
+      ) {
+        await FinancialLedger.updateOne(
+          { _id: ledger._id, status: "CONFIRMED" },
+          { $set: { payoutEligibleAt: eligibleAt } }
+        );
+      }
+
+      if (eligibleAt > now) {
+        skipped++;
+        results.push({
+          bookingId: booking._id,
+          reason: "15-day waiting period has not ended",
+          payoutEligibleAt: eligibleAt,
+        });
+        continue;
+      }
+
+      const paymentCheck = await validateLedgerPayment(
+        ledger,
+        booking._id
+      );
+
+      if (!paymentCheck.valid) {
+        skipped++;
+        results.push({
+          bookingId: booking._id,
+          reason: paymentCheck.reason,
+        });
+        continue;
+      }
+
+      if (
+        !Number.isSafeInteger(ledger.mentorEarningsPaise) ||
+        ledger.mentorEarningsPaise <= 0
+      ) {
+        skipped++;
+        results.push({
+          bookingId: booking._id,
+          reason: "Invalid mentor earnings amount",
+        });
+        continue;
+      }
+
       try {
-        if (
-          !booking ||
-          booking.status !== "COMPLETED" ||
-          !booking.completedAt ||
-          !ledger.completedAt
-        ) {
+        await Payout.create({
+          mentorId: booking.mentorId,
+          bookingId: booking._id,
+          amountPaise: ledger.mentorEarningsPaise,
+          currency: "INR",
+          status: "PENDING",
+          payoutEligibleAt: eligibleAt,
+        });
+
+        created++;
+
+        results.push({
+          bookingId: booking._id,
+          result: "PAYOUT_CREATED",
+          amountPaise: ledger.mentorEarningsPaise,
+        });
+      } catch (error) {
+        if (error.code === 11000) {
           skipped++;
           results.push({
-            bookingId: booking?._id || ledger.bookingId,
-            reason: "Completed booking and ledger are required",
+            bookingId: booking._id,
+            reason: "Payout already exists for this booking",
           });
           continue;
         }
 
-        // Ledger and booking completion timestamps must agree.
-        if (
-          new Date(ledger.completedAt).getTime() !==
-          new Date(booking.completedAt).getTime()
-        ) {
-          skipped++;
-          results.push({
-            bookingId: booking._id,
-            reason: "Booking and ledger completion times do not match",
-          });
-          continue;
-        }
-
-        const eligibleAt = getEligibilityDate(ledger.completedAt);
-
-        // Repair a stale eligibility timestamp in the ledger.
-        if (
-          !ledger.payoutEligibleAt ||
-          new Date(ledger.payoutEligibleAt).getTime() !==
-            eligibleAt.getTime()
-        ) {
-          await FinancialLedger.updateOne(
-            {
-              _id: ledger._id,
-              status: "CONFIRMED",
-            },
-            {
-              $set: { payoutEligibleAt: eligibleAt },
-            }
-          );
-        }
-
-        if (eligibleAt > now) {
-          skipped++;
-          results.push({
-            bookingId: booking._id,
-            reason: "15-day waiting period has not ended",
-            payoutEligibleAt: eligibleAt,
-          });
-          continue;
-        }
-
-        const paymentCheck = await validateLedgerPayment(
-          ledger,
-          booking._id
-        );
-
-        if (!paymentCheck.valid) {
-          skipped++;
-          results.push({
-            bookingId: booking._id,
-            reason: paymentCheck.reason,
-          });
-          continue;
-        }
-
-        if (
-          !Number.isSafeInteger(ledger.mentorEarningsPaise) ||
-          ledger.mentorEarningsPaise <= 0
-        ) {
-          skipped++;
-          results.push({
-            bookingId: booking._id,
-            reason: "Invalid mentor earnings amount",
-          });
-          continue;
-        }
-
-        try {
-          await Payout.create({
-            mentorId: booking.mentorId,
-            bookingId: booking._id,
-            amountPaise: ledger.mentorEarningsPaise,
-            currency: "INR",
-            status: "PENDING",
-            payoutEligibleAt: eligibleAt,
-          });
-
-          created++;
-
-          results.push({
-            bookingId: booking._id,
-            result: "PAYOUT_CREATED",
-            amountPaise: ledger.mentorEarningsPaise,
-          });
-        } catch (error) {
-          if (error.code === 11000) {
-            skipped++;
-            results.push({
-              bookingId: booking._id,
-              reason: "Payout already exists for this booking",
-            });
-            continue;
-          }
-
-          throw error;
-        }
-      } catch (bookingError) {
-        console.error(
-          "Payout generation failed for ledger:",
-          ledger._id,
-          bookingError
-        );
-        throw bookingError;
+        throw error;
       }
     }
 
@@ -345,6 +453,18 @@ const approvePayout = async (req, res) => {
 
     const eligibleAt = getEligibilityDate(ledger.completedAt);
 
+    if (
+      !payout.payoutEligibleAt ||
+      new Date(payout.payoutEligibleAt).getTime() !==
+        eligibleAt.getTime()
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Payout eligibility date does not match the completion date",
+        expectedPayoutEligibleAt: eligibleAt,
+      });
+    }
+
     if (eligibleAt > new Date()) {
       return res.status(409).json({
         success: false,
@@ -372,7 +492,6 @@ const approvePayout = async (req, res) => {
       });
     }
 
-    // Conditional update prevents two concurrent approvals.
     const approvedPayout = await Payout.findOneAndUpdate(
       {
         _id: payout._id,
@@ -416,6 +535,7 @@ const approvePayout = async (req, res) => {
 
 module.exports = {
   getAdminPayouts,
+  getAdminFinanceSummary,
   generateEligiblePayouts,
   approvePayout,
 };

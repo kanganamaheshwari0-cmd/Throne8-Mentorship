@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useState } from "react";
 
 const API = "http://localhost:8080/api/v1";
@@ -6,12 +7,27 @@ const money = (paise = 0) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-  }).format(Number(paise) / 100);
+    maximumFractionDigits: 2,
+  }).format(Number(paise || 0) / 100);
 
 const getId = (item) => item?._id || item?.id || "";
 
+const emptySummary = {
+  completedSessions: 0,
+  totalCompletedEarningsPaise: 0,
+  pendingEligibilityPaise: 0,
+  eligibleUnpaidPaise: 0,
+  payoutPendingPaise: 0,
+  payoutApprovedPaise: 0,
+  payoutProcessingPaise: 0,
+  totalPaidPaise: 0,
+  payoutFailedPaise: 0,
+  payoutCancelledPaise: 0,
+};
+
 export default function AdminPayouts() {
   const [payouts, setPayouts] = useState([]);
+  const [summary, setSummary] = useState(emptySummary);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -44,16 +60,24 @@ export default function AdminPayouts() {
     setError("");
 
     try {
-      const data = await request("/admin/payouts");
-      const list = Array.isArray(data.payouts)
-        ? data.payouts
-        : Array.isArray(data.data)
-          ? data.data
+      const [payoutData, financeData] = await Promise.all([
+        request("/admin/payouts"),
+        request("/admin/finance-summary"),
+      ]);
+
+      const list = Array.isArray(payoutData.payouts)
+        ? payoutData.payouts
+        : Array.isArray(payoutData.data)
+          ? payoutData.data
           : [];
 
       setPayouts(list);
+      setSummary({
+        ...emptySummary,
+        ...(financeData.summary || {}),
+      });
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Unable to load finance data.");
     } finally {
       setLoading(false);
     }
@@ -73,10 +97,13 @@ export default function AdminPayouts() {
         method: "POST",
       });
 
-      setMessage(data.message || "Payout generation request completed.");
+      setMessage(
+        data.message || "Eligible payout generation request completed."
+      );
+
       await loadPayouts();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Could not generate payouts.");
     } finally {
       setGenerating(false);
     }
@@ -95,19 +122,62 @@ export default function AdminPayouts() {
         { method: "PATCH" }
       );
 
-      setMessage(data.message || "Payout approval request completed.");
+      setMessage(data.message || "Payout approved successfully.");
       await loadPayouts();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Could not approve payout.");
     } finally {
       setBusyId("");
     }
   };
 
-  const totalAmount = payouts.reduce(
+  const totalRecordedPaise = payouts.reduce(
     (sum, payout) => sum + Number(payout.amountPaise || 0),
     0
   );
+
+  const financeCards = [
+    {
+      label: "Total Completed Earnings",
+      value: money(summary.totalCompletedEarningsPaise),
+      detail: `${summary.completedSessions} completed session(s)`,
+    },
+    {
+      label: "Pending Eligibility",
+      value: money(summary.pendingEligibilityPaise),
+      detail: "Waiting for the 15-day period",
+    },
+    {
+      label: "Eligible Unpaid",
+      value: money(summary.eligibleUnpaidPaise),
+      detail: "Eligible but not yet paid",
+    },
+    {
+      label: "Pending Approval",
+      value: money(summary.payoutPendingPaise),
+      detail: "Payout awaiting admin approval",
+    },
+    {
+      label: "Approved",
+      value: money(summary.payoutApprovedPaise),
+      detail: "Approved for processing",
+    },
+    {
+      label: "Processing",
+      value: money(summary.payoutProcessingPaise),
+      detail: "Payout processing status",
+    },
+    {
+      label: "Total Paid",
+      value: money(summary.totalPaidPaise),
+      detail: "Recorded as paid",
+    },
+    {
+      label: "Failed Payouts",
+      value: money(summary.payoutFailedPaise),
+      detail: "Failed payout records",
+    },
+  ];
 
   return (
     <main className="admin-payouts">
@@ -119,34 +189,59 @@ export default function AdminPayouts() {
           padding: 32px;
           font-family: Arial, sans-serif;
         }
+
         .payout-heading {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 16px;
           flex-wrap: wrap;
-          margin-bottom: 24px;
+          margin-bottom: 28px;
         }
-        .payout-heading h1 { margin: 0 0 8px; }
-        .payout-muted { color: #a3a59c; }
+
+        .payout-heading h1 {
+          margin: 0 0 8px;
+        }
+
+        .payout-muted {
+          color: #a3a59c;
+        }
+
+        .payout-section-title {
+          margin: 28px 0 16px;
+          font-size: 21px;
+        }
+
         .payout-stats {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          grid-template-columns: repeat(
+            auto-fit,
+            minmax(190px, 1fr)
+          );
           gap: 16px;
           margin-bottom: 24px;
         }
-        .payout-card, .payout-table-wrap {
+
+        .payout-card,
+        .payout-table-wrap {
           background: #1b1c19;
           border: 1px solid #34352f;
           border-radius: 12px;
           padding: 20px;
         }
+
         .payout-card strong {
           display: block;
           font-size: 24px;
-          margin-top: 10px;
+          margin: 12px 0 8px;
           overflow-wrap: anywhere;
         }
+
+        .payout-card small {
+          color: #a3a59c;
+          line-height: 1.5;
+        }
+
         .payout-button {
           border: 1px solid #77796e;
           border-radius: 8px;
@@ -156,34 +251,69 @@ export default function AdminPayouts() {
           cursor: pointer;
           font-weight: 600;
         }
+
         .payout-button:disabled {
           opacity: .5;
           cursor: not-allowed;
         }
+
         .payout-notice {
           padding: 12px 14px;
           border-radius: 8px;
           margin-bottom: 16px;
           overflow-wrap: anywhere;
         }
-        .payout-error { background: #442321; color: #ffd8d4; }
-        .payout-success { background: #203b2a; color: #d1f5d9; }
-        .payout-table-wrap { overflow-x: auto; }
+
+        .payout-error {
+          background: #442321;
+          color: #ffd8d4;
+        }
+
+        .payout-success {
+          background: #203b2a;
+          color: #d1f5d9;
+        }
+
+        .payout-table-wrap {
+          overflow-x: auto;
+        }
+
         .payout-table {
           width: 100%;
           border-collapse: collapse;
           min-width: 760px;
         }
-        .payout-table th, .payout-table td {
+
+        .payout-table th,
+        .payout-table td {
           text-align: left;
           padding: 14px 12px;
           border-bottom: 1px solid #34352f;
           vertical-align: middle;
         }
-        .payout-table th { color: #bfc1b5; font-size: 13px; }
-        .payout-status { font-weight: 700; }
+
+        .payout-table th {
+          color: #bfc1b5;
+          font-size: 13px;
+        }
+
+        .payout-id {
+          max-width: 180px;
+          overflow-wrap: anywhere;
+        }
+
+        .payout-status {
+          font-weight: 700;
+        }
+
         @media (max-width: 600px) {
-          .admin-payouts { padding: 18px; }
+          .admin-payouts {
+            padding: 18px;
+          }
+
+          .payout-card strong {
+            font-size: 21px;
+          }
         }
       `}</style>
 
@@ -192,44 +322,73 @@ export default function AdminPayouts() {
           <p className="payout-muted">THRONE8 / FINANCE</p>
           <h1>Mentor Payouts</h1>
           <p className="payout-muted">
-            Review payout records and manage approval.
+            Monitor mentor earnings, payout eligibility and payout history.
           </p>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button className="payout-button" onClick={loadPayouts}>
-            Refresh
+          <button
+            className="payout-button"
+            onClick={loadPayouts}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
           </button>
+
           <button
             className="payout-button"
             onClick={generatePayouts}
-            disabled={generating}
+            disabled={generating || loading}
           >
             {generating ? "Generating..." : "Generate Eligible Payouts"}
           </button>
         </div>
       </div>
 
-      {error && <div className="payout-notice payout-error">{error}</div>}
+      {error && (
+        <div className="payout-notice payout-error">{error}</div>
+      )}
+
       {message && (
         <div className="payout-notice payout-success">{message}</div>
       )}
+
+      <h2 className="payout-section-title">Finance Summary</h2>
+
+      {loading ? (
+        <p className="payout-muted">Loading finance summary...</p>
+      ) : (
+        <section className="payout-stats">
+          {financeCards.map((card) => (
+            <div className="payout-card" key={card.label}>
+              <span className="payout-muted">{card.label}</span>
+              <strong>{card.value}</strong>
+              <small>{card.detail}</small>
+            </div>
+          ))}
+        </section>
+      )}
+
+      <h2 className="payout-section-title">Payout Management</h2>
 
       <section className="payout-stats">
         <div className="payout-card">
           <span className="payout-muted">Payout Records</span>
           <strong>{payouts.length}</strong>
         </div>
+
         <div className="payout-card">
           <span className="payout-muted">Total Recorded Amount</span>
-          <strong>{money(totalAmount)}</strong>
+          <strong>{money(totalRecordedPaise)}</strong>
         </div>
+
         <div className="payout-card">
-          <span className="payout-muted">Pending Approval</span>
+          <span className="payout-muted">Pending Records</span>
           <strong>
             {payouts.filter((p) => p.status === "PENDING").length}
           </strong>
         </div>
+
         <div className="payout-card">
           <span className="payout-muted">Paid Records</span>
           <strong>
@@ -245,7 +404,8 @@ export default function AdminPayouts() {
           <p className="payout-muted">Loading payout records...</p>
         ) : payouts.length === 0 ? (
           <p className="payout-muted">
-            No payout records found. Generate eligible payouts when available.
+            No payout records found. Payouts can be generated when
+            sessions become eligible.
           </p>
         ) : (
           <table className="payout-table">
@@ -259,25 +419,28 @@ export default function AdminPayouts() {
                 <th>Action</th>
               </tr>
             </thead>
+
             <tbody>
               {payouts.map((payout) => {
                 const id = getId(payout);
+                const bookingId =
+                  typeof payout.bookingId === "object"
+                    ? getId(payout.bookingId)
+                    : payout.bookingId;
 
                 return (
                   <tr key={id}>
-                    <td>{id || "—"}</td>
-                    <td>
-                      {typeof payout.bookingId === "object"
-                        ? getId(payout.bookingId)
-                        : payout.bookingId || "—"}
-                    </td>
+                    <td className="payout-id">{id || "—"}</td>
+                    <td className="payout-id">{bookingId || "—"}</td>
                     <td>{money(payout.amountPaise)}</td>
                     <td className="payout-status">
                       {payout.status || "UNKNOWN"}
                     </td>
                     <td>
                       {payout.createdAt
-                        ? new Date(payout.createdAt).toLocaleDateString("en-IN")
+                        ? new Date(
+                            payout.createdAt
+                          ).toLocaleDateString("en-IN")
                         : "—"}
                     </td>
                     <td>
@@ -302,8 +465,9 @@ export default function AdminPayouts() {
       </section>
 
       <p className="payout-muted" style={{ marginTop: 18 }}>
+        Payout eligibility begins 15 calendar days after session completion.
         Approval alone does not transfer money. Actual Razorpay payout
-        processing and provider confirmation must be implemented separately.
+        processing and provider confirmation are separate steps.
       </p>
     </main>
   );

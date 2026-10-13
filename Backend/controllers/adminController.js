@@ -70,6 +70,75 @@ const verifyMentor = async (req, res) => {
   }
 };
 
+
+/**
+ * ADMIN: Update a mentor's commission rate.
+ * commissionRateBps is measured in basis points:
+ * 1000 = 10%, 2000 = 20%, 2500 = 25%.
+ */
+const updateMentorCommission = async (req, res) => {
+  try {
+    const { mentorId } = req.params;
+    const { commissionRateBps } = req.body;
+
+    if (!/^[0-9a-fA-F]{24}$/.test(mentorId || "")) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid mentor ID",
+      });
+    }
+
+    if (
+      !Number.isSafeInteger(commissionRateBps) ||
+      commissionRateBps < 0 ||
+      commissionRateBps > 10000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Commission must be a whole number between 0 and 10000 basis points",
+      });
+    }
+
+    const mentor = await Mentor.findByIdAndUpdate(
+      mentorId,
+      {
+        $set: { commissionRateBps },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).populate("userId", "name email");
+
+    if (!mentor) {
+      return res.status(404).json({
+        success: false,
+        message: "Mentor not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Mentor commission updated successfully",
+      commission: {
+        mentorId: mentor._id,
+        mentorName: mentor.userId?.name,
+        commissionRateBps: mentor.commissionRateBps,
+        commissionPercentage: mentor.commissionRateBps / 100,
+      },
+    });
+  } catch (error) {
+    console.error("Update mentor commission error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update mentor commission",
+    });
+  }
+};
+
+
 // ADMIN DASHBOARD STATISTICS
 const getAdminStats = async (req, res) => {
   try {
@@ -134,5 +203,6 @@ const getAdminStats = async (req, res) => {
 module.exports = {
   getAllMentors,
   verifyMentor,
+   updateMentorCommission,
   getAdminStats,
 };

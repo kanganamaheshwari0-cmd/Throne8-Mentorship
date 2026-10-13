@@ -7,11 +7,13 @@ const authMiddleware = require("../middleware/authMiddleware");
 const {
   getAllMentors,
   verifyMentor,
+  updateMentorCommission,
   getAdminStats,
 } = require("../controllers/adminController");
 
 const {
   getAdminPayouts,
+  getAdminFinanceSummary,
   generateEligiblePayouts,
   approvePayout,
 } = require("../controllers/payoutController");
@@ -27,29 +29,22 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
-// All admin routes require authentication and admin role.
 router.use(authMiddleware, adminOnly);
 
 // Mentor management
 router.get("/mentors", getAllMentors);
 router.get("/stats", getAdminStats);
 
-router.patch(
-  "/mentors/:mentorId/verify",
-  verifyMentor
-);
+router.patch("/mentors/:mentorId/verify", verifyMentor);
 
-// Payout management
+// Payout and finance management
 router.get("/payouts", getAdminPayouts);
+router.get("/finance-summary", getAdminFinanceSummary);
 
-router.post(
-  "/payouts/generate",
-  generateEligiblePayouts
-);
+router.post("/payouts/generate", generateEligiblePayouts);
 
-router.patch(
-  "/payouts/:payoutId/approve",
-  approvePayout
-);
+router.patch( "/mentors/:mentorId/commission", updateMentorCommission);
+
+router.patch("/payouts/:payoutId/approve", approvePayout);
 
 module.exports = router;

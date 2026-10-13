@@ -204,6 +204,29 @@ function AdminDashboard() {
           </>
         )}
 
+        
+        <h2 className="admin-section-title">
+          Finance &amp; Payout Management
+        </h2>
+        
+        <div className="admin-management-card">
+          <h3>Mentor Payouts</h3>
+        
+          <p>
+            Review mentor earnings, check payout eligibility,
+            and manage payout approvals.
+          </p>
+        
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => navigate("/admin/payouts")}
+          >
+            Manage Finance &amp; Payouts
+          </button>
+        </div>
+
+
         <button
           type="button"
           className="btn btn-outline admin-back-button"

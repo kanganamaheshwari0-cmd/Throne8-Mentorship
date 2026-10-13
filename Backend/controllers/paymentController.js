@@ -5,6 +5,8 @@ const Razorpay = require("razorpay");
 const Payment = require("../models/Payment");
 const Booking = require("../models/Booking");
 const FinancialLedger = require("../models/FinancialLedger");
+const WebhookEvent = require("../models/WebhookEvent");
+const { recordWebhookEvent } = require("../services/webhookService");
 
 const getRazorpayInstance = () => {
   if (
@@ -321,6 +323,294 @@ const createRazorpayOrder = async (req, res) => {
     });
   }
 };
+
+
+const handleRazorpayWebhook = async (req, res) => {
+  let webhookEvent = null;
+
+  try {
+    const signature = req.headers["x-razorpay-signature"];
+    const eventId = req.headers["x-razorpay-event-id"];
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    if (!Buffer.isBuffer(req.body)) {
+      return res.status(400).json({
+        success: false,
+        message: "Raw webhook body is required",
+      });
+    }
+
+    if (!signature || !eventId || !webhookSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "Webhook verification configuration is missing",
+      });
+    }
+
+    // Verify signature against the exact raw request bytes.
+    const expectedSignature = crypto
+      .createHmac("sha256", webhookSecret)
+      .update(req.body)
+      .digest();
+
+    if (!/^[a-f0-9]{64}$/i.test(signature)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid webhook signature",
+      });
+    }
+
+    const receivedSignature = Buffer.from(signature, "hex");
+
+    if (
+      receivedSignature.length !== expectedSignature.length ||
+      !crypto.timingSafeEqual(
+        expectedSignature,
+        receivedSignature
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Webhook signature verification failed",
+      });
+    }
+
+    // Parse only after signature verification succeeds.
+    const body = JSON.parse(req.body.toString("utf8"));
+
+    if (!body.event || typeof body.event !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Webhook event type is missing",
+      });
+    }
+
+    const recorded = await recordWebhookEvent({
+      eventId,
+      eventType: body.event,
+      payload: body,
+    });
+
+    webhookEvent = recorded.event;
+
+    if (!webhookEvent) {
+      throw new Error("Webhook event record could not be loaded");
+    }
+
+    if (recorded.duplicate) {
+      if (webhookEvent.status === "PROCESSED") {
+        return res.status(200).json({
+          success: true,
+          duplicate: true,
+          message: "Webhook event already processed",
+        });
+      }
+
+      if (webhookEvent.status === "PROCESSING") {
+        return res.status(200).json({
+          success: true,
+          duplicate: true,
+          message: "Webhook event is already processing",
+        });
+      }
+    }
+
+    // Claim a new or previously failed event atomically.
+    const claimedEvent = await WebhookEvent.findOneAndUpdate(
+      {
+        _id: webhookEvent._id,
+        status: { $in: ["RECEIVED", "FAILED"] },
+      },
+      {
+        $set: {
+          status: "PROCESSING",
+          errorMessage: null,
+        },
+      },
+      { new: true }
+    );
+
+    if (!claimedEvent) {
+      return res.status(200).json({
+        success: true,
+        duplicate: true,
+        message: "Webhook event is already being handled",
+      });
+    }
+
+    webhookEvent = claimedEvent;
+
+    // Ignore other event types safely.
+    if (body.event !== "payment.captured") {
+      await WebhookEvent.updateOne(
+        { _id: webhookEvent._id, status: "PROCESSING" },
+        {
+          $set: {
+            status: "PROCESSED",
+            processedAt: new Date(),
+          },
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Webhook event acknowledged",
+      });
+    }
+
+    const providerPayment = body.payload?.payment?.entity;
+
+    if (
+      !providerPayment ||
+      typeof providerPayment.id !== "string" ||
+      typeof providerPayment.order_id !== "string"
+    ) {
+      throw new Error("Captured payment details are missing");
+    }
+
+    const payment = await Payment.findOne({
+      gateway: "razorpay",
+      gatewayOrderId: providerPayment.order_id,
+    });
+
+    if (!payment) {
+      throw new Error("Matching local payment order was not found");
+    }
+
+    if (
+      providerPayment.amount !== payment.amountPaise ||
+      providerPayment.currency !== payment.currency ||
+      providerPayment.status !== "captured"
+    ) {
+      throw new Error("Captured payment details do not match");
+    }
+
+    if (
+      payment.status === "CAPTURED" &&
+      payment.gatewayPaymentId !== providerPayment.id
+    ) {
+      throw new Error("A different payment is already recorded");
+    }
+
+    if (
+      payment.status !== "CREATED" &&
+      payment.status !== "CAPTURED"
+    ) {
+      throw new Error("Local payment is not eligible for capture");
+    }
+
+    if (payment.status !== "CAPTURED") {
+      payment.gatewayPaymentId = providerPayment.id;
+      payment.status = "CAPTURED";
+      payment.capturedAt = new Date();
+
+      payment.rawProviderRefs = {
+        orderId: providerPayment.order_id,
+        paymentId: providerPayment.id,
+      };
+
+      await payment.save();
+    }
+
+    const booking = await Booking.findById(payment.bookingId);
+
+    if (!booking) {
+      throw new Error("Matching booking was not found");
+    }
+
+    // Reuse the existing financial ledger validation.
+    await ensureFinancialLedger(booking, payment);
+
+    if (
+      booking.status === "PENDING_PAYMENT" &&
+      booking.holdExpiresAt > new Date()
+    ) {
+      const confirmedBooking = await Booking.findOneAndUpdate(
+        {
+          _id: booking._id,
+          status: "PENDING_PAYMENT",
+          holdExpiresAt: { $gt: new Date() },
+        },
+        {
+          $set: { status: "CONFIRMED" },
+        },
+        { new: true }
+      );
+
+      if (confirmedBooking) {
+        await FinancialLedger.updateOne(
+          {
+            bookingId: booking._id,
+            paymentId: payment._id,
+            status: "CAPTURED_PENDING_BOOKING",
+          },
+          {
+            $set: {
+              status: "CONFIRMED",
+              bookingConfirmedAt: new Date(),
+            },
+          }
+        );
+      } else {
+        await markLedgerForReview(
+          booking._id,
+          payment._id,
+          "Webhook captured payment but booking confirmation requires reconciliation."
+        );
+      }
+    } else if (
+      booking.status !== "CONFIRMED" &&
+      booking.status !== "COMPLETED"
+    ) {
+      await markLedgerForReview(
+        booking._id,
+        payment._id,
+        "Webhook captured payment but booking cannot be confirmed automatically. Reconciliation or refund review is required."
+      );
+    }
+
+    await WebhookEvent.updateOne(
+      { _id: webhookEvent._id, status: "PROCESSING" },
+      {
+        $set: {
+          status: "PROCESSED",
+          processedAt: new Date(),
+          errorMessage: null,
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Webhook processed successfully",
+    });
+  } catch (error) {
+    console.error("Razorpay webhook error:", error.message);
+
+    if (webhookEvent) {
+      await WebhookEvent.updateOne(
+        { _id: webhookEvent._id, status: "PROCESSING" },
+        {
+          $set: {
+            status: "FAILED",
+            errorMessage: error.message,
+          },
+        }
+      ).catch((dbError) => {
+        console.error(
+          "Webhook event status update failed:",
+          dbError.message
+        );
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Webhook processing failed",
+    });
+  }
+};
+
 
 // VERIFY RAZORPAY PAYMENT
 const verifyRazorpayPayment = async (req, res) => {
@@ -659,4 +949,5 @@ module.exports = {
   getMyPayments,
   createRazorpayOrder,
   verifyRazorpayPayment,
+   handleRazorpayWebhook,
 };
