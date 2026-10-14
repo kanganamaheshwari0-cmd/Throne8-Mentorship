@@ -1,8 +1,25 @@
+
 const mongoose = require("mongoose");
+
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const Payout = require("../models/Payout");
+const Refund = require("../models/Refund");
 const FinancialLedger = require("../models/FinancialLedger");
+
+const BLOCKING_REFUND_STATUSES = [
+  "REQUESTED",
+  "PROCESSING",
+  "PROCESSED",
+  "RECONCILIATION_REQUIRED",
+];
+
+const ACTIVE_PAYOUT_STATUSES = [
+  "PENDING",
+  "APPROVED",
+  "PROCESSING",
+  "PAID",
+];
 
 // Completion time + 15 calendar days in UTC.
 const getEligibilityDate = (completedAt) => {
@@ -11,11 +28,10 @@ const getEligibilityDate = (completedAt) => {
   return eligibleAt;
 };
 
-// Validate ledger, payment, and refund state before any payout action.
-const validateLedgerPayment = async (ledger, bookingId) => {
+const validateLedgerAmounts = (ledger) => {
   if (
     !ledger ||
-    ledger.status !== "CONFIRMED" ||
+    !["CONFIRMED", "PAYOUT_APPROVED"].includes(ledger.status) ||
     !ledger.paymentId ||
     !Number.isSafeInteger(ledger.studentPaidPaise) ||
     ledger.studentPaidPaise <= 0 ||
@@ -29,7 +45,7 @@ const validateLedgerPayment = async (ledger, bookingId) => {
   ) {
     return {
       valid: false,
-      reason: "Missing or invalid confirmed financial ledger",
+      reason: "Missing or invalid financial ledger",
     };
   }
 
@@ -48,42 +64,59 @@ const validateLedgerPayment = async (ledger, bookingId) => {
     };
   }
 
-  // Check every payment associated with this booking.
-  const payments = await Payment.find({ bookingId })
-    .select(
-      "_id bookingId status amountPaise refundedAmountPaise refunds"
-    )
-    .lean();
+  return { valid: true };
+};
 
-  // Any existing refund amount blocks payout until the financial
-  // state is reviewed and reconciled.
-  const refundBlockingStatuses = [
-    "PARTIALLY_REFUNDED",
-    "REFUNDED",
-  ];
+// Validate the captured payment and all relevant refund records.
+const validateLedgerPayment = async (ledger, bookingId) => {
+  const amountCheck = validateLedgerAmounts(ledger);
 
-  const refundInProgressOrCompleted = payments.some((payment) => {
-    const refunds = Array.isArray(payment.refunds)
-      ? payment.refunds
-      : [];
+  if (!amountCheck.valid) {
+    return amountCheck;
+  }
 
-    const hasActiveOrCompletedRefund = refunds.some((refund) =>
-      ["PENDING", "PROCESSED"].includes(refund.status)
-    );
+  const [payments, refunds] = await Promise.all([
+    Payment.find({ bookingId })
+      .select(
+        "_id bookingId status amountPaise refundedAmountPaise refunds"
+      )
+      .lean(),
 
-    return (
-      refundBlockingStatuses.includes(payment.status) ||
-      (Number.isSafeInteger(payment.refundedAmountPaise) &&
-        payment.refundedAmountPaise > 0) ||
-      hasActiveOrCompletedRefund
-    );
-  });
+    Refund.find({
+      bookingId,
+      status: { $in: BLOCKING_REFUND_STATUSES },
+    })
+      .select("_id status amountPaise paymentId")
+      .lean(),
+  ]);
 
-  if (refundInProgressOrCompleted) {
+  if (refunds.length > 0) {
     return {
       valid: false,
       reason:
-        "Refund pending or completed for this booking; payout is blocked",
+        "A refund is pending, processed, or requires reconciliation; payout is blocked",
+    };
+  }
+
+  const paymentRefundExists = payments.some((payment) => {
+    const embeddedRefunds = Array.isArray(payment.refunds)
+      ? payment.refunds
+      : [];
+
+    return (
+      ["PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status) ||
+      (Number.isSafeInteger(payment.refundedAmountPaise) &&
+        payment.refundedAmountPaise > 0) ||
+      embeddedRefunds.some((refund) =>
+        ["PENDING", "PROCESSED"].includes(refund.status)
+      )
+    );
+  });
+
+  if (paymentRefundExists) {
+    return {
+      valid: false,
+      reason: "Payment refund information blocks payout",
     };
   }
 
@@ -113,7 +146,7 @@ const validateLedgerPayment = async (ledger, bookingId) => {
   return { valid: true };
 };
 
-// Fetch the latest confirmed ledger and recheck payment/refund state.
+// Payout generation and approval require a CONFIRMED ledger.
 const validateBookingForPayout = async (booking) => {
   if (
     !booking ||
@@ -139,7 +172,8 @@ const validateBookingForPayout = async (booking) => {
   ) {
     return {
       valid: false,
-      reason: "A matching confirmed financial ledger is required",
+      reason:
+        "A matching confirmed ledger is required; it may already be locked for refund, payout, or review",
     };
   }
 
@@ -199,10 +233,7 @@ const getAdminFinanceSummary = async (req, res) => {
       .lean();
 
     const bookingMap = new Map(
-      bookings.map((booking) => [
-        booking._id.toString(),
-        booking,
-      ])
+      bookings.map((booking) => [booking._id.toString(), booking])
     );
 
     const bookingIds = bookings.map((booking) => booking._id);
@@ -210,7 +241,7 @@ const getAdminFinanceSummary = async (req, res) => {
     const [ledgers, payouts] = await Promise.all([
       FinancialLedger.find({
         bookingId: { $in: bookingIds },
-        status: "CONFIRMED",
+        status: { $in: ["CONFIRMED", "PAYOUT_APPROVED"] },
         completedAt: { $ne: null },
       }).lean(),
       Payout.find({}).lean(),
@@ -235,9 +266,7 @@ const getAdminFinanceSummary = async (req, res) => {
         !booking.completedAt ||
         !ledger.completedAt ||
         new Date(booking.completedAt).getTime() !==
-          new Date(ledger.completedAt).getTime() ||
-        !Number.isSafeInteger(ledger.mentorEarningsPaise) ||
-        ledger.mentorEarningsPaise <= 0
+          new Date(ledger.completedAt).getTime()
       ) {
         continue;
       }
@@ -251,8 +280,6 @@ const getAdminFinanceSummary = async (req, res) => {
         continue;
       }
 
-      const eligibleAt = getEligibilityDate(booking.completedAt);
-
       completedSessions++;
       totalCompletedEarningsPaise += ledger.mentorEarningsPaise;
 
@@ -260,12 +287,17 @@ const getAdminFinanceSummary = async (req, res) => {
 
       if (
         payout &&
-        ["PENDING", "APPROVED", "PROCESSING", "PAID"].includes(
-          payout.status
-        )
+        ACTIVE_PAYOUT_STATUSES.includes(payout.status)
       ) {
         continue;
       }
+
+      // A payout-approved ledger must not be counted as available.
+      if (ledger.status === "PAYOUT_APPROVED") {
+        continue;
+      }
+
+      const eligibleAt = getEligibilityDate(booking.completedAt);
 
       if (eligibleAt > now) {
         pendingEligibilityPaise += ledger.mentorEarningsPaise;
@@ -298,7 +330,7 @@ const getAdminFinanceSummary = async (req, res) => {
         payoutCancelledPaise: sumPayouts(["CANCELLED"]),
       },
       note:
-        "Amounts are in paise. Refund-blocked bookings are excluded from eligible earnings. Approval does not mean money has been transferred.",
+        "Amounts are in paise. Refund-blocked bookings are excluded. Approval does not mean money has been transferred.",
     });
   } catch (error) {
     console.error("Admin finance summary error:", error);
@@ -310,7 +342,7 @@ const getAdminFinanceSummary = async (req, res) => {
   }
 };
 
-// GENERATE PAYOUT RECORDS FROM ELIGIBLE FINANCIAL LEDGERS
+// GENERATE ELIGIBLE PAYOUT RECORDS
 const generateEligiblePayouts = async (req, res) => {
   try {
     const now = new Date();
@@ -381,71 +413,32 @@ const generateEligiblePayouts = async (req, res) => {
         continue;
       }
 
-      const paymentCheck = await validateLedgerPayment(
-        ledger,
-        booking._id
-      );
+      const validation = await validateBookingForPayout(booking);
 
-      if (!paymentCheck.valid) {
+      if (!validation.valid) {
         skipped++;
         results.push({
           bookingId: booking._id,
-          reason: paymentCheck.reason,
-        });
-        continue;
-      }
-
-      if (
-        !Number.isSafeInteger(ledger.mentorEarningsPaise) ||
-        ledger.mentorEarningsPaise <= 0
-      ) {
-        skipped++;
-        results.push({
-          bookingId: booking._id,
-          reason: "Invalid mentor earnings amount",
-        });
-        continue;
-      }
-
-      // Recheck the current booking, ledger and payment state immediately
-      // before creating a payout record.
-      const latestBooking = await Booking.findById(booking._id)
-        .select("_id mentorId status completedAt")
-        .lean();
-
-      const latestCheck = await validateBookingForPayout(latestBooking);
-
-      if (
-        !latestCheck.valid ||
-        latestCheck.ledger.mentorEarningsPaise !==
-          ledger.mentorEarningsPaise
-      ) {
-        skipped++;
-        results.push({
-          bookingId: booking._id,
-          reason: latestCheck.valid
-            ? "Ledger earnings changed; payout requires rechecking"
-            : latestCheck.reason,
+          reason: validation.reason,
         });
         continue;
       }
 
       try {
         await Payout.create({
-          mentorId: latestBooking.mentorId,
-          bookingId: latestBooking._id,
-          amountPaise: latestCheck.ledger.mentorEarningsPaise,
+          mentorId: booking.mentorId,
+          bookingId: booking._id,
+          amountPaise: validation.ledger.mentorEarningsPaise,
           currency: "INR",
           status: "PENDING",
           payoutEligibleAt: eligibleAt,
         });
 
         created++;
-
         results.push({
-          bookingId: latestBooking._id,
+          bookingId: booking._id,
           result: "PAYOUT_CREATED",
-          amountPaise: latestCheck.ledger.mentorEarningsPaise,
+          amountPaise: validation.ledger.mentorEarningsPaise,
         });
       } catch (error) {
         if (error.code === 11000) {
@@ -480,8 +473,12 @@ const generateEligiblePayouts = async (req, res) => {
   }
 };
 
-// APPROVE A PENDING PAYOUT
+// APPROVE A PENDING PAYOUT.
+// The ledger is conditionally locked before the payout is approved.
 const approvePayout = async (req, res) => {
+  let lockedLedgerId = null;
+  let payoutApprovalCompleted = false;
+
   try {
     const { payoutId } = req.params;
 
@@ -512,6 +509,7 @@ const approvePayout = async (req, res) => {
 
     if (
       !booking ||
+      !booking.mentorId ||
       booking.mentorId.toString() !== payout.mentorId.toString()
     ) {
       return res.status(409).json({
@@ -539,7 +537,7 @@ const approvePayout = async (req, res) => {
     ) {
       return res.status(409).json({
         success: false,
-        message: "Payout eligibility date does not match the completion date",
+        message: "Payout eligibility date does not match completion date",
         expectedPayoutEligibleAt: eligibleAt,
       });
     }
@@ -559,29 +557,76 @@ const approvePayout = async (req, res) => {
       });
     }
 
-    // Re-read the ledger and payment state immediately before approval.
-    const finalValidation = await validateBookingForPayout(
-      await Booking.findById(booking._id)
+    // Shared conditional lock with requestRefund:
+    // refund: CONFIRMED -> REFUND_PENDING
+    // payout: CONFIRMED -> PAYOUT_APPROVED
+    const lockedLedger = await FinancialLedger.findOneAndUpdate(
+      {
+        _id: ledger._id,
+        status: "CONFIRMED",
+        bookingId: booking._id,
+        paymentId: ledger.paymentId,
+      },
+      {
+        $set: {
+          status: "PAYOUT_APPROVED",
+          notes:
+            "Payout approved; refund requests are blocked pending payout review",
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
     );
 
-    if (
-      !finalValidation.valid ||
-      finalValidation.ledger.mentorEarningsPaise !== payout.amountPaise
-    ) {
+    if (!lockedLedger) {
       return res.status(409).json({
         success: false,
-        message: finalValidation.valid
-          ? "Ledger earnings changed; payout requires review"
-          : finalValidation.reason,
+        message:
+          "Ledger is no longer available for payout approval. Check refund or reconciliation status.",
       });
     }
 
-    // Atomic status transition prevents two admins from approving the
-    // same PENDING payout at the same time.
+    lockedLedgerId = lockedLedger._id;
+
+    // Recheck payment and refund records after taking the ledger lock.
+    const finalPaymentCheck = await validateLedgerPayment(
+      lockedLedger.toObject(),
+      booking._id
+    );
+
+    if (!finalPaymentCheck.valid) {
+      await FinancialLedger.updateOne(
+        {
+          _id: lockedLedger._id,
+          status: "PAYOUT_APPROVED",
+        },
+        {
+          $set: {
+            status: "REVIEW_REQUIRED",
+            notes:
+              "Payout approval blocked; financial state requires review",
+          },
+        }
+      );
+
+      lockedLedgerId = null;
+
+      return res.status(409).json({
+        success: false,
+        message: finalPaymentCheck.reason,
+      });
+    }
+
+    // Only one request can transition this payout from PENDING to APPROVED.
     const approvedPayout = await Payout.findOneAndUpdate(
       {
         _id: payout._id,
         status: "PENDING",
+        bookingId: booking._id,
+        mentorId: booking.mentorId,
+        amountPaise: lockedLedger.mentorEarningsPaise,
       },
       {
         $set: {
@@ -597,24 +642,120 @@ const approvePayout = async (req, res) => {
     );
 
     if (!approvedPayout) {
+      // The state is unexpected. Do not automatically unlock the ledger.
+      await FinancialLedger.updateOne(
+        {
+          _id: lockedLedger._id,
+          status: "PAYOUT_APPROVED",
+        },
+        {
+          $set: {
+            status: "REVIEW_REQUIRED",
+            notes:
+              "Payout approval did not complete normally; manual financial review required",
+          },
+        }
+      );
+
+      lockedLedgerId = null;
+
       return res.status(409).json({
         success: false,
-        message: "Payout status changed. Refresh and try again.",
+        message:
+          "Payout status changed or could not be safely approved. Check payout and ledger records.",
       });
     }
+
+    payoutApprovalCompleted = true;
+    lockedLedgerId = null;
 
     return res.status(200).json({
       success: true,
       message: "Payout approved for processing",
       payout: approvedPayout,
-      note: "No money was transferred.",
+      note:
+        "No money was transferred. A separate verified payout process is required.",
     });
   } catch (error) {
     console.error("Approve payout error:", error);
 
+    if (lockedLedgerId && !payoutApprovalCompleted) {
+      try {
+        // Never restore CONFIRMED automatically after an unexpected error.
+        // Inspect the persisted payout state and preserve the ledger lock.
+        const latestPayout = mongoose.isValidObjectId(req.params.payoutId)
+          ? await Payout.findById(req.params.payoutId).lean()
+          : null;
+
+        if (
+          latestPayout &&
+          ["APPROVED", "PROCESSING", "PAID"].includes(
+            latestPayout.status
+          )
+        ) {
+          // Approval or processing may already have been persisted.
+          await FinancialLedger.updateOne(
+            {
+              _id: lockedLedgerId,
+              status: "PAYOUT_APPROVED",
+            },
+            {
+              $set: {
+                notes:
+                  "Payout may already be approved or processing; preserve ledger lock and verify records",
+              },
+            }
+          );
+        } else {
+          // PENDING, failed, cancelled, missing, or unknown:
+          // require reconciliation rather than risking an unsafe unlock.
+          await FinancialLedger.updateOne(
+            {
+              _id: lockedLedgerId,
+              status: "PAYOUT_APPROVED",
+            },
+            {
+              $set: {
+                status: "REVIEW_REQUIRED",
+                notes:
+                  "Payout state could not be safely confirmed after an error; manual reconciliation required",
+              },
+            }
+          );
+        }
+      } catch (recoveryError) {
+        console.error(
+          "Payout recovery failed; manual review required:",
+          recoveryError.message
+        );
+
+        // Best effort only. If MongoDB is unavailable, the existing
+        // PAYOUT_APPROVED lock must not be deliberately released.
+        await FinancialLedger.updateOne(
+          {
+            _id: lockedLedgerId,
+            status: "PAYOUT_APPROVED",
+          },
+          {
+            $set: {
+              status: "REVIEW_REQUIRED",
+              notes:
+                "Could not verify payout state after an error; manual reconciliation required",
+            },
+          }
+        ).catch((ledgerError) => {
+          console.error(
+            "Could not mark ledger for review:",
+            ledgerError.message
+          );
+        });
+      }
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Unable to approve payout",
+      message:
+        "Unable to confirm payout approval. Check payout and ledger status before retrying.",
     });
   }
 };

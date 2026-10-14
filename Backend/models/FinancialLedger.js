@@ -71,6 +71,7 @@ const financialLedgerSchema = new mongoose.Schema(
       enum: [
         "CAPTURED_PENDING_BOOKING",
         "CONFIRMED",
+        "PAYOUT_APPROVED",
         "REVIEW_REQUIRED",
         "REFUND_PENDING",
         "REFUNDED",

@@ -39,7 +39,8 @@ const statusClass = (status) => {
   if (status === "CAPTURED") return "captured";
   if (
     ["FAILED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)
-  ) return "failed";
+  )
+    return "failed";
   if (["CREATED", "AUTHORIZED"].includes(status)) return "pending";
   return "";
 };
@@ -52,6 +53,28 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
+
+  // Earnings Queue finance summary
+  const [earningsSummary, setEarningsSummary] = useState(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState("");
+
+  const fetchEarningsSummary = useCallback(async () => {
+    try {
+      setEarningsLoading(true);
+      setEarningsError("");
+
+      const response = await api.get("/admin/finance-summary");
+      setEarningsSummary(response.data.summary || {});
+    } catch (err) {
+      setEarningsError(
+        err.response?.data?.message ||
+          "Unable to load mentor earnings summary."
+      );
+    } finally {
+      setEarningsLoading(false);
+    }
+  }, []);
 
   // Payment transactions
   const [transactions, setTransactions] = useState([]);
@@ -76,6 +99,9 @@ function AdminDashboard() {
   const [commissionOverview, setCommissionOverview] = useState(null);
   const [commissionRecords, setCommissionRecords] = useState([]);
   const [commissionLoading, setCommissionLoading] = useState(false);
+  const [refunds, setRefunds] = useState([]);
+  const [refundLoading, setRefundLoading] = useState(false);
+  const [refundError, setRefundError] = useState("");
   const [commissionError, setCommissionError] = useState("");
   const [commissionMessage, setCommissionMessage] = useState("");
   const [commissionSearch, setCommissionSearch] = useState("");
@@ -107,7 +133,11 @@ function AdminDashboard() {
   }, []);
 
   const fetchTransactions = useCallback(async () => {
-    if (transactionFrom && transactionTo && transactionFrom > transactionTo) {
+    if (
+      transactionFrom &&
+      transactionTo &&
+      transactionFrom > transactionTo
+    ) {
       setTransactionError("From date must be on or before the To date.");
       return;
     }
@@ -198,6 +228,7 @@ function AdminDashboard() {
 
       setCommissionEdits((previous) => {
         const next = { ...previous };
+
         mentors.forEach((mentor) => {
           if (next[mentor._id] === undefined) {
             next[mentor._id] = String(
@@ -205,6 +236,7 @@ function AdminDashboard() {
             );
           }
         });
+
         return next;
       });
     } catch (err) {
@@ -259,6 +291,31 @@ function AdminDashboard() {
     }
   };
 
+  const fetchRefunds = useCallback(async () => {
+    try {
+      setRefundLoading(true);
+      setRefundError("");
+
+      const response = await api.get("/admin/refunds");
+      const data = response.data;
+
+      setRefunds(
+        Array.isArray(data.refunds)
+          ? data.refunds
+          : Array.isArray(data.records)
+            ? data.records
+            : []
+      );
+    } catch (err) {
+      setRefundError(
+        err.response?.data?.message ||
+          "Unable to load refund records."
+      );
+    } finally {
+      setRefundLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
@@ -272,11 +329,26 @@ function AdminDashboard() {
   }, [activeSection, fetchCommissionMentors]);
 
   useEffect(() => {
+    if (activeSection === "refunds") {
+      fetchRefunds();
+    }
+  }, [activeSection, fetchRefunds]);
+
+  // Load finance summary only when Earnings Queue is selected.
+  useEffect(() => {
+    if (activeSection === "earnings") {
+      fetchEarningsSummary();
+    }
+  }, [activeSection, fetchEarningsSummary]);
+
+  useEffect(() => {
     const handleVerificationUpdate = () => fetchStats();
+
     window.addEventListener(
       "mentor-verification-updated",
       handleVerificationUpdate
     );
+
     return () => {
       window.removeEventListener(
         "mentor-verification-updated",
@@ -564,13 +636,33 @@ function AdminDashboard() {
                 type="button"
                 className="t8-button"
                 onClick={() => {
-                  if (activeSection === "transactions") fetchTransactions();
-                  else if (activeSection === "commission") fetchCommissionMentors();
-                  else fetchStats();
+                  if (activeSection === "transactions") {
+                    fetchTransactions();
+                  } else if (activeSection === "commission") {
+                    fetchCommissionMentors();
+                  } else if (activeSection === "earnings") {
+                    fetchEarningsSummary();
+                  } else if (activeSection === "refunds") {
+                    fetchRefunds();
+                  } else {
+                    fetchStats();
+                  }
                 }}
-                disabled={loading || transactionLoading || commissionLoading}
+                disabled={
+                  loading ||
+                  transactionLoading ||
+                  commissionLoading ||
+                  refundLoading ||
+                  earningsLoading
+                }
               >
-                {loading || transactionLoading || commissionLoading ? "Refreshing..." : "↻ Refresh"}
+                {loading ||
+                transactionLoading ||
+                commissionLoading ||
+                refundLoading ||
+                earningsLoading
+                  ? "Refreshing..."
+                  : "↻ Refresh"}
               </button>
               <button type="button" className="t8-button primary" onClick={() => navigate("/admin/payouts")}>
                 ₹ Manage payouts
@@ -845,26 +937,270 @@ function AdminDashboard() {
             </section>
           )}
 
+          {/* Earnings Queue */}
+          {activeSection === "earnings" && (
+            <section>
+              {earningsError && (
+                <div className="t8-error" role="alert">
+                  <p>{earningsError}</p>
+                  <button
+                    type="button"
+                    className="t8-button"
+                    onClick={fetchEarningsSummary}
+                    disabled={earningsLoading}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              <div className="t8-panel">
+                <div className="t8-page-heading">
+                  <div>
+                    <h2>Mentor Earnings Queue</h2>
+                    <p>
+                      Track completed session earnings and the 15-day payout
+                      eligibility period.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="t8-button"
+                    onClick={fetchEarningsSummary}
+                    disabled={earningsLoading}
+                  >
+                    {earningsLoading ? "Refreshing..." : "↻ Refresh"}
+                  </button>
+                </div>
+
+                {earningsLoading && !earningsSummary ? (
+                  <div className="t8-loading">
+                    Loading mentor earnings...
+                  </div>
+                ) : earningsSummary ? (
+                  <>
+                    <div className="t8-transaction-summary">
+                      <article className="t8-transaction-metric">
+                        <span>Completed Sessions</span>
+                        <strong>
+                          {formatNumber(earningsSummary.completedSessions)}
+                        </strong>
+                      </article>
+
+                      <article className="t8-transaction-metric">
+                        <span>Completed Earnings</span>
+                        <strong>
+                          {formatRupees(
+                            earningsSummary.totalCompletedEarningsPaise
+                          )}
+                        </strong>
+                      </article>
+
+                      <article className="t8-transaction-metric">
+                        <span>Pending Eligibility</span>
+                        <strong>
+                          {formatRupees(
+                            earningsSummary.pendingEligibilityPaise
+                          )}
+                        </strong>
+                      </article>
+
+                      <article className="t8-transaction-metric">
+                        <span>Eligible Unpaid</span>
+                        <strong>
+                          {formatRupees(
+                            earningsSummary.eligibleUnpaidPaise
+                          )}
+                        </strong>
+                      </article>
+                    </div>
+
+                    <div className="t8-notice">
+                      <strong>15-day payout rule:</strong> Earnings remain
+                      pending until the eligibility period ends. Eligible
+                      earnings may then proceed through payout generation and
+                      admin approval. Approval alone does not transfer money.
+                    </div>
+
+                    <div className="t8-heading-actions">
+                      <button
+                        type="button"
+                        className="t8-button primary"
+                        onClick={() => navigate("/admin/payouts")}
+                      >
+                        Manage Mentor Payouts →
+                      </button>
+                    </div>
+                  </>
+                ) : !earningsError ? (
+                  <div className="t8-transaction-empty">
+                    Earnings summary is not available.
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          )}
+
+          {activeSection === "refunds" && (
+            <section className="t8-panel">
+              <div className="t8-page-heading">
+                <div>
+                  <h2>Refund Records</h2>
+                  <p>
+                    Review recorded refunds, amounts, statuses and linked IDs.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="t8-button"
+                  onClick={fetchRefunds}
+                  disabled={refundLoading}
+                >
+                  {refundLoading ? "Refreshing..." : "↻ Refresh"}
+                </button>
+              </div>
+
+              {refundError && (
+                <div className="t8-error" role="alert">
+                  <p>{refundError}</p>
+                  <button
+                    type="button"
+                    className="t8-button"
+                    onClick={fetchRefunds}
+                    disabled={refundLoading}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              {refundLoading && refunds.length === 0 ? (
+                <div className="t8-loading">Loading refund records...</div>
+              ) : refunds.length === 0 ? (
+                <div className="t8-transaction-empty">
+                  <strong>No refund records found.</strong>
+                  <br />
+                  Refund records will appear here when available.
+                </div>
+              ) : (
+                <div className="t8-transaction-table-wrap">
+                  <table className="t8-transaction-table">
+                    <thead>
+                      <tr>
+                        <th>Refund ID</th>
+                        <th>Booking ID</th>
+                        <th>Payment ID</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Created At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {refunds.map((refund, index) => (
+                        <tr key={refund._id || refund.gatewayRefundId || index}>
+                          <td>
+                            <span className="t8-transaction-id">
+                              {refund.gatewayRefundId || refund._id || "—"}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="t8-transaction-id">
+                              {refund.bookingId?._id ||
+                                refund.bookingId ||
+                                "—"}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="t8-transaction-id">
+                              {refund.gatewayPaymentId ||
+                                refund.paymentId?.gatewayPaymentId ||
+                                refund.paymentId?._id ||
+                                refund.paymentId ||
+                                "—"}
+                            </span>
+                          </td>
+                          <td>
+                            {formatRupees(
+                              refund.amountPaise ?? refund.amount ?? 0
+                            )}
+                          </td>
+                          <td>
+                            <span
+                              className={`t8-payment-status ${
+                                ["FAILED", "REJECTED"].includes(
+                                  String(refund.status || "").toUpperCase()
+                                )
+                                  ? "failed"
+                                  : ["PENDING", "PROCESSING"].includes(
+                                      String(refund.status || "").toUpperCase()
+                                    )
+                                    ? "pending"
+                                    : ""
+                              }`}
+                            >
+                              {(refund.status || "UNKNOWN").replaceAll("_", " ")}
+                            </span>
+                          </td>
+                          <td>
+                            {refund.reason || refund.notes?.reason || "—"}
+                          </td>
+                          <td>
+                            {formatDateTime(
+                              refund.createdAt || refund.processedAt
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="t8-footer">
+                Refund records are displayed from the connected admin API.
+                An empty list means the API returned no refund records; it does
+                not confirm that a refund was processed.
+              </div>
+            </section>
+          )}
+
           {activeSection !== "overview" &&
             activeSection !== "transactions" &&
-            activeSection !== "commission" && (
+            activeSection !== "commission" &&
+            activeSection !== "earnings" &&
+            activeSection !== "refunds" && (
               <section className="t8-panel">
                 <h2>{activeMenu?.label}</h2>
                 <p>
-                  {activeSection === "earnings" && "Use Mentor Payouts to review eligible earnings and payout approvals."}
-                  {activeSection === "refunds" && "Refund requests and disputes need their corresponding backend endpoints before they can be displayed or updated here."}
-                  {activeSection === "failed" && "Open Mentor Payouts to review available payout records. Failed-payout filtering requires the corresponding records and status data."}
-                  {activeSection === "reconciliation" && "Provider-versus-ledger reconciliation needs a backend reconciliation endpoint and recorded discrepancy data."}
-                  {activeSection === "audit" && "The audit log needs its connected backend endpoint to display real actors, timestamps and recorded changes."}
+                  {activeSection === "failed" &&
+                    "Open Mentor Payouts to review available payout records. Failed-payout filtering requires the corresponding records and status data."}
+                  {activeSection === "reconciliation" &&
+                    "Provider-versus-ledger reconciliation needs a backend reconciliation endpoint and recorded discrepancy data."}
+                  {activeSection === "audit" &&
+                    "The audit log needs its connected backend endpoint to display real actors, timestamps and recorded changes."}
                 </p>
-                {(activeSection === "earnings" || activeSection === "failed") && <button type="button" className="t8-button primary" onClick={() => navigate("/admin/payouts")}>Open Mentor Payouts →</button>}
-                <div className="t8-footer">This section requires its corresponding backend integration to display and manage real records.</div>
+                {activeSection === "failed" && (
+                  <button
+                    type="button"
+                    className="t8-button primary"
+                    onClick={() => navigate("/admin/payouts")}
+                  >
+                    Open Mentor Payouts →
+                  </button>
+                )}
+                <div className="t8-footer">
+                  This section requires its corresponding backend integration
+                  to display and manage real records.
+                </div>
               </section>
             )}
 
           <footer className="t8-footer">
-            <strong>THRONE8</strong> · Mentorship Admin Portal<br />
-            Signed in as {user?.name || "Admin"} · Finance data is provided by your connected API.
+            <strong>THRONE8</strong> · Mentorship Admin Portal
+            <br />
+            Signed in as {user?.name || "Admin"} · Finance data is provided by
+            your connected API.
           </footer>
         </main>
       </div>
