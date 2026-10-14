@@ -8,6 +8,8 @@ const {
   getAllMentors,
   verifyMentor,
   updateMentorCommission,
+  getCommissionOverview,
+  getCommissionRecords,
   getAdminStats,
 } = require("../controllers/adminController");
 
@@ -27,6 +29,10 @@ const {
   requestRefund,
   getAdminRefunds,
 } = require("../controllers/refundController");
+
+const {
+  getAdminTransactions,
+} = require("../controllers/paymentController");
 
 const adminOnly = (req, res, next) => {
   if (req.user?.role !== "admin") {
@@ -60,5 +66,9 @@ router.post("/refunds", requestRefund);
 // Audit trail and ledger
 router.get("/audit-logs", getAuditLogs);
 router.get("/ledger-entries", getLedgerEntries);
+router.get("/commission-overview", getCommissionOverview);
+router.get("/commission-records", getCommissionRecords);
+
+router.get("/transactions", getAdminTransactions);
 
 module.exports = router;

@@ -1148,9 +1148,314 @@ const verifyRazorpayPayment = async (req, res) => {
   }
 };
 
+
+const getAdminTransactions = async (req, res) => {
+  try {
+    const {
+      search = "",
+      status = "",
+      from = "",
+      to = "",
+      page = "1",
+      limit = "10",
+    } = req.query;
+
+    const currentPage = Number(page);
+    const pageSize = Number(limit);
+
+    if (
+      !Number.isInteger(currentPage) ||
+      currentPage < 1 ||
+      !Number.isInteger(pageSize) ||
+      pageSize < 1 ||
+      pageSize > 100
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Page must be positive and limit must be between 1 and 100.",
+      });
+    }
+
+    const allowedStatuses = [
+      "CREATED",
+      "AUTHORIZED",
+      "CAPTURED",
+      "FAILED",
+      "PARTIALLY_REFUNDED",
+      "REFUNDED",
+    ];
+
+    if (status && !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment status filter.",
+      });
+    }
+
+    const dateFilter = {};
+
+    if (from) {
+      const fromDate = new Date(from);
+
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid from date.",
+        });
+      }
+
+      dateFilter.$gte = fromDate;
+    }
+
+    if (to) {
+      const toDate = new Date(to);
+
+      if (Number.isNaN(toDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid to date.",
+        });
+      }
+
+      // Include the entire selected day for YYYY-MM-DD input.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        toDate.setUTCHours(23, 59, 59, 999);
+      }
+
+      dateFilter.$lte = toDate;
+    }
+
+    if (
+      dateFilter.$gte &&
+      dateFilter.$lte &&
+      dateFilter.$gte > dateFilter.$lte
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "From date must be before the to date.",
+      });
+    }
+
+    const filter = {};
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (Object.keys(dateFilter).length) {
+      filter.createdAt = dateFilter;
+    }
+
+    const term = String(search).trim().slice(0, 120);
+
+    if (term) {
+      const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escapedTerm, "i");
+      const matchingBookingIds = [];
+
+      // Support searching by student name/email.
+      const matchingUsers = await require("../models/User")
+        .find({
+          $or: [{ name: regex }, { email: regex }],
+        })
+        .select("_id")
+        .limit(200);
+
+      const userIds = matchingUsers.map((user) => user._id);
+
+      if (userIds.length) {
+        const studentBookings = await Booking.find({
+          studentId: { $in: userIds },
+        }).select("_id");
+
+        matchingBookingIds.push(
+          ...studentBookings.map((booking) => booking._id)
+        );
+
+        const matchingMentors = await require("../models/Mentor")
+          .find({ userId: { $in: userIds } })
+          .select("_id");
+
+        if (matchingMentors.length) {
+          const mentorBookings = await Booking.find({
+            mentorId: {
+              $in: matchingMentors.map((mentor) => mentor._id),
+            },
+          }).select("_id");
+
+          matchingBookingIds.push(
+            ...mentorBookings.map((booking) => booking._id)
+          );
+        }
+      }
+
+      const matchingBookings = await Booking.find({
+        $or: [
+          { _id: /^[a-f\d]{24}$/i.test(term) ? term : null },
+        ],
+      }).select("_id");
+
+      matchingBookingIds.push(
+        ...matchingBookings.map((booking) => booking._id)
+      );
+
+      const searchConditions = [
+        { gatewayOrderId: regex },
+        { gatewayPaymentId: regex },
+      ];
+
+      if (/^[a-f\d]{24}$/i.test(term)) {
+        searchConditions.push({ bookingId: term });
+      }
+
+      if (matchingBookingIds.length) {
+        searchConditions.push({
+          bookingId: { $in: matchingBookingIds },
+        });
+      }
+
+      filter.$and = [
+        {
+          $or: searchConditions,
+        },
+      ];
+    }
+
+    const [transactions, total, paymentStats] = await Promise.all([
+      Payment.find(filter)
+        .populate({
+          path: "bookingId",
+          select: "studentId mentorId status slotStart slotEnd pricePaise currency",
+          populate: [
+            {
+              path: "studentId",
+              select: "name email",
+            },
+            {
+              path: "mentorId",
+              select: "userId expertise",
+              populate: {
+                path: "userId",
+                select: "name email",
+              },
+            },
+          ],
+        })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((currentPage - 1) * pageSize)
+        .limit(pageSize)
+        .lean(),
+
+      Payment.countDocuments(filter),
+
+      Payment.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            amountPaise: { $sum: "$amountPaise" },
+            refundedAmountPaise: { $sum: "$refundedAmountPaise" },
+          },
+        },
+      ]),
+    ]);
+
+    const summary = {
+      totalTransactions: 0,
+      capturedTransactions: 0,
+      capturedAmountPaise: 0,
+      pendingTransactions: 0,
+      failedTransactions: 0,
+      failedAmountPaise: 0,
+      refundedTransactions: 0,
+      refundedAmountPaise: 0,
+    };
+
+    for (const item of paymentStats) {
+      summary.totalTransactions += item.count;
+
+      if (item._id === "CAPTURED") {
+        summary.capturedTransactions = item.count;
+        summary.capturedAmountPaise = item.amountPaise;
+      }
+
+      if (["CREATED", "AUTHORIZED"].includes(item._id)) {
+        summary.pendingTransactions += item.count;
+      }
+
+      if (item._id === "FAILED") {
+        summary.failedTransactions = item.count;
+        summary.failedAmountPaise = item.amountPaise;
+      }
+
+      if (["PARTIALLY_REFUNDED", "REFUNDED"].includes(item._id)) {
+        summary.refundedTransactions += item.count;
+        summary.refundedAmountPaise += item.refundedAmountPaise;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin transactions fetched successfully",
+      summary,
+      pagination: {
+        page: currentPage,
+        limit: pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
+      transactions: transactions.map((payment) => ({
+        _id: payment._id,
+        bookingId: payment.bookingId?._id || payment.bookingId || null,
+        bookingStatus: payment.bookingId?.status || null,
+        slotStart: payment.bookingId?.slotStart || null,
+        slotEnd: payment.bookingId?.slotEnd || null,
+        student: payment.bookingId?.studentId
+          ? {
+              name: payment.bookingId.studentId.name,
+              email: payment.bookingId.studentId.email,
+            }
+          : null,
+        mentor: payment.bookingId?.mentorId?.userId
+          ? {
+              name: payment.bookingId.mentorId.userId.name,
+              email: payment.bookingId.mentorId.userId.email,
+              expertise: payment.bookingId.mentorId.expertise || [],
+            }
+          : null,
+        gateway: payment.gateway,
+        gatewayOrderId: payment.gatewayOrderId,
+        gatewayPaymentId: payment.gatewayPaymentId,
+        amountPaise: payment.amountPaise,
+        currency: payment.currency,
+        status: payment.status,
+        refundedAmountPaise: payment.refundedAmountPaise || 0,
+        refunds: (payment.refunds || []).map((refund) => ({
+          gatewayRefundId: refund.gatewayRefundId,
+          amountPaise: refund.amountPaise,
+          status: refund.status,
+          processedAt: refund.processedAt,
+        })),
+        capturedAt: payment.capturedAt,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get admin transactions error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch admin transactions.",
+    });
+  }
+};
+
+
 module.exports = {
   getMyPayments,
   createRazorpayOrder,
   verifyRazorpayPayment,
   handleRazorpayWebhook,
+  getAdminTransactions,
 };
