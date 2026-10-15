@@ -1,15 +1,8 @@
-const crypto = require("crypto");
+
 const mongoose = require("mongoose");
 
 const ledgerEntrySchema = new mongoose.Schema(
   {
-    entryId: {
-      type: String,
-      required: true,
-      unique: true,
-      default: () => crypto.randomUUID(),
-    },
-
     bookingId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
@@ -20,12 +13,13 @@ const ledgerEntrySchema = new mongoose.Schema(
     paymentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Payment",
-      default: null,
+      required: true,
       index: true,
     },
 
     eventType: {
       type: String,
+      enum: ["PAYMENT_CAPTURED", "REFUND_SUCCEEDED"],
       required: true,
       index: true,
     },
@@ -37,7 +31,6 @@ const ledgerEntrySchema = new mongoose.Schema(
         "PLATFORM_COMMISSION",
         "MENTOR_PAYABLE",
         "REFUND_CLEARING",
-        "MENTOR_PAYOUT_CLEARING",
       ],
       required: true,
     },
@@ -54,7 +47,7 @@ const ledgerEntrySchema = new mongoose.Schema(
       min: 1,
       validate: {
         validator: Number.isSafeInteger,
-        message: "Ledger amount must be a whole number in paise.",
+        message: "Amount must be a whole number in paise.",
       },
     },
 
@@ -65,44 +58,26 @@ const ledgerEntrySchema = new mongoose.Schema(
       required: true,
     },
 
-    // Same financial event dobara aaye to duplicate entry nahi banegi.
     eventKey: {
       type: String,
       required: true,
       unique: true,
+      trim: true,
     },
   },
   {
-    timestamps: { createdAt: true, updatedAt: false },
-    versionKey: false,
+    timestamps: true,
   }
 );
 
-ledgerEntrySchema.index({ bookingId: 1, createdAt: 1 });
-
-// Ledger entries kabhi edit ya delete nahi hongi.
-// Refund/correction ke liye ulti (reversing) entry banegi.
-const blockChange = async function () {
-  throw new Error("Ledger entries are immutable");
-};
-
-ledgerEntrySchema.pre("save", async function () {
-  if (!this.isNew) {
-    throw new Error("Ledger entries are immutable");
-  }
+ledgerEntrySchema.index({
+  bookingId: 1,
+  eventType: 1,
 });
 
-[
-  "updateOne",
-  "updateMany",
-  "findOneAndUpdate",
-  "findOneAndReplace",
-  "replaceOne",
-  "deleteOne",
-  "deleteMany",
-  "findOneAndDelete",
-].forEach((hook) => {
-  ledgerEntrySchema.pre(hook, blockChange);
+ledgerEntrySchema.index({
+  paymentId: 1,
+  eventType: 1,
 });
 
 module.exports = mongoose.model("LedgerEntry", ledgerEntrySchema);

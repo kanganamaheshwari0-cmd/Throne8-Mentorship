@@ -1,3 +1,4 @@
+
 const crypto = require("crypto");
 const Razorpay = require("razorpay");
 const Refund = require("../models/Refund");
@@ -25,13 +26,18 @@ const getRazorpayInstance = () => {
 };
 
 // CREATE OR REUSE FINANCIAL LEDGER
-// Unique bookingId and paymentId constraints prevent duplicate entries.
+// Validates financial values and safely handles concurrent inserts.
 const ensureFinancialLedger = async (booking, payment) => {
   if (payment.status !== "CAPTURED" || !payment.capturedAt) {
-    throw new Error("A captured payment is required for ledger creation");
+    throw new Error(
+      "A captured payment is required for ledger creation"
+    );
   }
 
-  if (payment.bookingId.toString() !== booking._id.toString()) {
+  const sameId = (a, b) =>
+    a != null && b != null && String(a) === String(b);
+
+  if (!sameId(payment.bookingId, booking._id)) {
     throw new Error("Payment does not belong to this booking");
   }
 
@@ -46,36 +52,57 @@ const ensureFinancialLedger = async (booking, payment) => {
     (booking.pricePaise * booking.commissionRateBps) / 10000
   );
 
+  const expectedMentorEarnings =
+    booking.pricePaise - expectedCommission;
+
   if (
     booking.commissionPaise !== expectedCommission ||
-    booking.mentorGrossPaise !==
-      booking.pricePaise - expectedCommission
+    booking.mentorGrossPaise !== expectedMentorEarnings
   ) {
     throw new Error("Booking financial amounts do not match");
   }
 
-  const existingLedger = await FinancialLedger.findOne({
-    $or: [
-      { bookingId: booking._id },
-      { paymentId: payment._id },
-    ],
-  });
-
-  if (existingLedger) {
-    const sameBooking =
-      existingLedger.bookingId.toString() === booking._id.toString();
-
-    const samePayment =
-      existingLedger.paymentId.toString() === payment._id.toString();
-
-    if (!sameBooking || !samePayment) {
+  // Validate the ledger identity and all important financial values.
+  const validateLedger = (ledger) => {
+    if (
+      !sameId(ledger.bookingId, booking._id) ||
+      !sameId(ledger.paymentId, payment._id)
+    ) {
       throw new Error(
         "Existing ledger has a conflicting booking or payment"
       );
     }
 
-    // Only reconcile dates on an already-confirmed ledger.
-    // Do not override review or refund statuses.
+    if (
+      ledger.currency !== payment.currency ||
+      ledger.studentPaidPaise !== payment.amountPaise ||
+      ledger.commissionRateBps !== booking.commissionRateBps ||
+      ledger.platformCommissionPaise !== expectedCommission ||
+      ledger.mentorEarningsPaise !== expectedMentorEarnings
+    ) {
+      throw new Error(
+        "Existing ledger financial values conflict; reconciliation required"
+      );
+    }
+
+    return ledger;
+  };
+
+  const findMatchingLedger = async () =>
+    FinancialLedger.findOne({
+      $or: [
+        { bookingId: booking._id },
+        { paymentId: payment._id },
+      ],
+    });
+
+  const existingLedger = await findMatchingLedger();
+
+  if (existingLedger) {
+    validateLedger(existingLedger);
+
+    // Reconcile dates only for an already-confirmed ledger.
+    // Never automatically reset review or refund statuses.
     if (existingLedger.status === "CONFIRMED") {
       const updates = {};
 
@@ -115,8 +142,7 @@ const ensureFinancialLedger = async (booking, payment) => {
     studentPaidPaise: payment.amountPaise,
     commissionRateBps: booking.commissionRateBps,
     platformCommissionPaise: expectedCommission,
-    mentorEarningsPaise:
-      booking.pricePaise - expectedCommission,
+    mentorEarningsPaise: expectedMentorEarnings,
     status: isConfirmed
       ? "CONFIRMED"
       : "CAPTURED_PENDING_BOOKING",
@@ -137,26 +163,18 @@ const ensureFinancialLedger = async (booking, payment) => {
   try {
     return await FinancialLedger.create(ledgerData);
   } catch (error) {
-    // Concurrent verification requests may race on unique indexes.
+    // A concurrent request may have inserted the ledger first.
     if (error.code === 11000) {
-      const ledger = await FinancialLedger.findOne({
-        $or: [
-          { bookingId: booking._id },
-          { paymentId: payment._id },
-        ],
-      });
+      const ledger = await findMatchingLedger();
 
-      if (
-        ledger &&
-        ledger.bookingId.toString() === booking._id.toString() &&
-        ledger.paymentId.toString() === payment._id.toString()
-      ) {
-        return ledger;
+      if (!ledger) {
+        throw new Error(
+          "Duplicate ledger key detected, but no ledger was found; reconciliation required"
+        );
       }
 
-      throw new Error(
-        "Duplicate ledger conflict requires reconciliation"
-      );
+      // Reuse only when identity and financial values match.
+      return validateLedger(ledger);
     }
 
     throw error;
@@ -299,7 +317,10 @@ const createRazorpayOrder = async (req, res) => {
         status: "CREATED",
       });
     } catch (dbError) {
-      console.error("Payment record creation failed:", dbError.message);
+      console.error(
+        "Payment record creation failed:",
+        dbError.message
+      );
 
       return res.status(500).json({
         success: false,
@@ -325,7 +346,6 @@ const createRazorpayOrder = async (req, res) => {
     });
   }
 };
-
 
 const handleRazorpayWebhook = async (req, res) => {
   let webhookEvent = null;
@@ -454,7 +474,6 @@ const handleRazorpayWebhook = async (req, res) => {
       });
 
       if (!refundRecord) {
-        // Do not silently acknowledge an unmatched financial event.
         throw new Error(
           "Local refund record not found; refund reconciliation required"
         );
@@ -492,7 +511,6 @@ const handleRazorpayWebhook = async (req, res) => {
           );
         }
 
-        // Prevent the same refund from increasing the total twice.
         const previousEntry = payment.refunds.find(
           (item) => item.gatewayRefundId === providerRefund.id
         );
@@ -560,11 +578,16 @@ const handleRazorpayWebhook = async (req, res) => {
           }
         );
 
-        // A completed refund must never make this ledger payout-eligible.
         await FinancialLedger.updateOne(
           {
             _id: ledger._id,
-            status: { $in: ["REFUND_PENDING", "REVIEW_REQUIRED", "REFUNDED"] },
+            status: {
+              $in: [
+                "REFUND_PENDING",
+                "REVIEW_REQUIRED",
+                "REFUNDED",
+              ],
+            },
           },
           {
             $set: {
@@ -580,8 +603,6 @@ const handleRazorpayWebhook = async (req, res) => {
           }
         );
       } else {
-        // A failed refund does not prove that money was returned.
-        // Keep the ledger blocked until the payment is reconciled.
         if (providerRefund.status !== "failed") {
           throw new Error(
             "Provider refund status is not confirmed as failed"
@@ -651,7 +672,7 @@ const handleRazorpayWebhook = async (req, res) => {
       });
     }
 
-    // Preserve the existing captured-payment workflow.
+    // Acknowledge unrelated event types without changing payment state.
     if (body.event !== "payment.captured") {
       await WebhookEvent.updateOne(
         { _id: webhookEvent._id, status: "PROCESSING" },
@@ -869,7 +890,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Verify Razorpay signature with timing-safe comparison.
     const expectedSignature = crypto
       .createHmac("sha256", secret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
@@ -893,7 +913,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Confirm actual payment status with Razorpay.
     const razorpay = getRazorpayInstance();
 
     const providerPayment = await razorpay.payments.fetch(
@@ -913,7 +932,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Persist the verified capture.
     if (payment.status === "CAPTURED") {
       if (payment.gatewayPaymentId !== razorpay_payment_id) {
         return res.status(409).json({
@@ -940,13 +958,9 @@ const verifyRazorpayPayment = async (req, res) => {
       await payment.save();
     }
 
-    // Create or reuse the ledger after verifying capture.
     await ensureFinancialLedger(booking, payment);
-
-    // TOPIC 2: double-entry ledger lines (safe to call again, no duplicates)
     await tryRecordPaymentCaptured({ booking, payment });
 
-    // A completed booking must remain completed on a retry.
     if (booking.status === "COMPLETED") {
       const ledger = await FinancialLedger.findOne({
         bookingId: booking._id,
@@ -974,7 +988,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Idempotent handling for an already-confirmed booking.
     if (booking.status === "CONFIRMED") {
       await FinancialLedger.updateOne(
         {
@@ -1005,8 +1018,6 @@ const verifyRazorpayPayment = async (req, res) => {
 
     const now = new Date();
 
-    // Captured payments that cannot confirm their booking
-    // must be reviewed; do not automatically refund.
     if (
       booking.status !== "PENDING_PAYMENT" ||
       booking.holdExpiresAt <= now
@@ -1049,7 +1060,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Atomically confirm only while the hold remains active.
     const confirmedBooking = await Booking.findOneAndUpdate(
       {
         _id: booking._id,
@@ -1109,7 +1119,6 @@ const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Update ledger only after booking confirmation succeeds.
     await FinancialLedger.updateOne(
       {
         bookingId: confirmedBooking._id,
@@ -1147,7 +1156,6 @@ const verifyRazorpayPayment = async (req, res) => {
     });
   }
 };
-
 
 const getAdminTransactions = async (req, res) => {
   try {
@@ -1217,7 +1225,6 @@ const getAdminTransactions = async (req, res) => {
         });
       }
 
-      // Include the entire selected day for YYYY-MM-DD input.
       if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
         toDate.setUTCHours(23, 59, 59, 999);
       }
@@ -1253,7 +1260,6 @@ const getAdminTransactions = async (req, res) => {
       const regex = new RegExp(escapedTerm, "i");
       const matchingBookingIds = [];
 
-      // Support searching by student name/email.
       const matchingUsers = await require("../models/User")
         .find({
           $or: [{ name: regex }, { email: regex }],
@@ -1451,11 +1457,11 @@ const getAdminTransactions = async (req, res) => {
   }
 };
 
-
 module.exports = {
   getMyPayments,
   createRazorpayOrder,
   verifyRazorpayPayment,
   handleRazorpayWebhook,
   getAdminTransactions,
+  ensureFinancialLedger,
 };

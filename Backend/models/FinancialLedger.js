@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const financialLedgerSchema = new mongoose.Schema(
@@ -7,7 +8,6 @@ const financialLedgerSchema = new mongoose.Schema(
       ref: "Booking",
       required: true,
       unique: true,
-      index: true,
     },
 
     paymentId: {
@@ -15,7 +15,6 @@ const financialLedgerSchema = new mongoose.Schema(
       ref: "Payment",
       required: true,
       unique: true,
-      index: true,
     },
 
     currency: {
@@ -111,6 +110,39 @@ const financialLedgerSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Validate the relationship between the financial amounts.
+financialLedgerSchema.pre("validate", function () {
+  if (
+    !Number.isSafeInteger(this.studentPaidPaise) ||
+    !Number.isSafeInteger(this.commissionRateBps) ||
+    !Number.isSafeInteger(this.platformCommissionPaise) ||
+    !Number.isSafeInteger(this.mentorEarningsPaise)
+  ) {
+    return;
+  }
+
+  if (
+    this.platformCommissionPaise + this.mentorEarningsPaise !==
+    this.studentPaidPaise
+  ) {
+    this.invalidate(
+      "mentorEarningsPaise",
+      "Platform commission plus mentor earnings must equal student payment."
+    );
+  }
+
+  const expectedCommission = Math.round(
+    (this.studentPaidPaise * this.commissionRateBps) / 10000
+  );
+
+  if (this.platformCommissionPaise !== expectedCommission) {
+    this.invalidate(
+      "platformCommissionPaise",
+      "Platform commission does not match the recorded commission rate."
+    );
+  }
+});
 
 financialLedgerSchema.index({ status: 1, createdAt: -1 });
 

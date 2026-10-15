@@ -34,6 +34,14 @@ const {
   getAdminTransactions,
 } = require("../controllers/paymentController");
 
+const {
+  getAdminReconciliation,
+} = require("../controllers/reconciliationController");
+
+const {
+  repairMissingFinancialLedgers,
+} = require("../controllers/financialLedgerRepairController");
+
 const adminOnly = (req, res, next) => {
   if (req.user?.role !== "admin") {
     return res.status(403).json({
@@ -70,5 +78,13 @@ router.get("/commission-overview", getCommissionOverview);
 router.get("/commission-records", getCommissionRecords);
 
 router.get("/transactions", getAdminTransactions);
+
+// Read-only financial reconciliation
+router.get("/reconciliation", getAdminReconciliation);
+
+router.post(
+  "/reconciliation/repair",
+  repairMissingFinancialLedgers
+);
 
 module.exports = router;
