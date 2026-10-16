@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const Booking = require("../models/Booking");
@@ -6,6 +5,9 @@ const Payment = require("../models/Payment");
 const Payout = require("../models/Payout");
 const Refund = require("../models/Refund");
 const FinancialLedger = require("../models/FinancialLedger");
+const {
+  calculateEligibilityDate,
+} = require("../services/payoutEligibilityService");
 
 const BLOCKING_REFUND_STATUSES = [
   "REQUESTED",
@@ -21,13 +23,10 @@ const ACTIVE_PAYOUT_STATUSES = [
   "PAID",
 ];
 
-// Completion time + 15 calendar days in UTC.
-const getEligibilityDate = (completedAt) => {
-  const eligibleAt = new Date(completedAt);
-  eligibleAt.setUTCDate(eligibleAt.getUTCDate() + 15);
-  return eligibleAt;
-};
+// Shared service ensures consistent 15-day UTC eligibility calculation.
+const getEligibilityDate = calculateEligibilityDate;
 
+// Validate the ledger's financial amounts.
 const validateLedgerAmounts = (ledger) => {
   if (
     !ledger ||
@@ -67,7 +66,7 @@ const validateLedgerAmounts = (ledger) => {
   return { valid: true };
 };
 
-// Validate the captured payment and all relevant refund records.
+// Validate captured payment and related refund records.
 const validateLedgerPayment = async (ledger, bookingId) => {
   const amountCheck = validateLedgerAmounts(ledger);
 
@@ -146,7 +145,7 @@ const validateLedgerPayment = async (ledger, bookingId) => {
   return { valid: true };
 };
 
-// Payout generation and approval require a CONFIRMED ledger.
+// Verify booking, ledger, completion time, payment, and refunds.
 const validateBookingForPayout = async (booking) => {
   if (
     !booking ||
@@ -244,6 +243,7 @@ const getAdminFinanceSummary = async (req, res) => {
         status: { $in: ["CONFIRMED", "PAYOUT_APPROVED"] },
         completedAt: { $ne: null },
       }).lean(),
+
       Payout.find({}).lean(),
     ]);
 
@@ -292,7 +292,7 @@ const getAdminFinanceSummary = async (req, res) => {
         continue;
       }
 
-      // A payout-approved ledger must not be counted as available.
+      // Approved ledger earnings are not available for another payout.
       if (ledger.status === "PAYOUT_APPROVED") {
         continue;
       }
@@ -371,10 +371,12 @@ const generateEligiblePayouts = async (req, res) => {
         !ledger.completedAt
       ) {
         skipped++;
+
         results.push({
           bookingId: booking?._id || ledger.bookingId,
           reason: "Completed booking and ledger are required",
         });
+
         continue;
       }
 
@@ -383,10 +385,12 @@ const generateEligiblePayouts = async (req, res) => {
         new Date(booking.completedAt).getTime()
       ) {
         skipped++;
+
         results.push({
           bookingId: booking._id,
           reason: "Booking and ledger completion times do not match",
         });
+
         continue;
       }
 
@@ -405,11 +409,13 @@ const generateEligiblePayouts = async (req, res) => {
 
       if (eligibleAt > now) {
         skipped++;
+
         results.push({
           bookingId: booking._id,
           reason: "15-day waiting period has not ended",
           payoutEligibleAt: eligibleAt,
         });
+
         continue;
       }
 
@@ -417,10 +423,12 @@ const generateEligiblePayouts = async (req, res) => {
 
       if (!validation.valid) {
         skipped++;
+
         results.push({
           bookingId: booking._id,
           reason: validation.reason,
         });
+
         continue;
       }
 
@@ -435,6 +443,7 @@ const generateEligiblePayouts = async (req, res) => {
         });
 
         created++;
+
         results.push({
           bookingId: booking._id,
           result: "PAYOUT_CREATED",
@@ -443,10 +452,12 @@ const generateEligiblePayouts = async (req, res) => {
       } catch (error) {
         if (error.code === 11000) {
           skipped++;
+
           results.push({
             bookingId: booking._id,
             reason: "Payout already exists for this booking",
           });
+
           continue;
         }
 
@@ -473,8 +484,8 @@ const generateEligiblePayouts = async (req, res) => {
   }
 };
 
-// APPROVE A PENDING PAYOUT.
-// The ledger is conditionally locked before the payout is approved.
+// APPROVE A PENDING PAYOUT
+// The ledger is conditionally locked before approval.
 const approvePayout = async (req, res) => {
   let lockedLedgerId = null;
   let payoutApprovalCompleted = false;
@@ -590,7 +601,7 @@ const approvePayout = async (req, res) => {
 
     lockedLedgerId = lockedLedger._id;
 
-    // Recheck payment and refund records after taking the ledger lock.
+    // Recheck payments and refunds after acquiring the ledger lock.
     const finalPaymentCheck = await validateLedgerPayment(
       lockedLedger.toObject(),
       booking._id
@@ -619,7 +630,7 @@ const approvePayout = async (req, res) => {
       });
     }
 
-    // Only one request can transition this payout from PENDING to APPROVED.
+    // Only one request may change the payout from PENDING to APPROVED.
     const approvedPayout = await Payout.findOneAndUpdate(
       {
         _id: payout._id,
@@ -642,7 +653,7 @@ const approvePayout = async (req, res) => {
     );
 
     if (!approvedPayout) {
-      // The state is unexpected. Do not automatically unlock the ledger.
+      // Do not automatically unlock the ledger in an unexpected state.
       await FinancialLedger.updateOne(
         {
           _id: lockedLedger._id,
@@ -693,7 +704,6 @@ const approvePayout = async (req, res) => {
             latestPayout.status
           )
         ) {
-          // Approval or processing may already have been persisted.
           await FinancialLedger.updateOne(
             {
               _id: lockedLedgerId,
@@ -707,8 +717,6 @@ const approvePayout = async (req, res) => {
             }
           );
         } else {
-          // PENDING, failed, cancelled, missing, or unknown:
-          // require reconciliation rather than risking an unsafe unlock.
           await FinancialLedger.updateOne(
             {
               _id: lockedLedgerId,
@@ -729,8 +737,7 @@ const approvePayout = async (req, res) => {
           recoveryError.message
         );
 
-        // Best effort only. If MongoDB is unavailable, the existing
-        // PAYOUT_APPROVED lock must not be deliberately released.
+        // Best effort only. If MongoDB is unavailable, preserve the lock.
         await FinancialLedger.updateOne(
           {
             _id: lockedLedgerId,

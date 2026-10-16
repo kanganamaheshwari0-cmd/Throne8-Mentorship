@@ -1,5 +1,6 @@
 
 const HOLDING_PERIOD_DAYS = 15;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const calculateEligibilityDate = (sessionCompletedAt) => {
   const completedAt = new Date(sessionCompletedAt);
@@ -8,10 +9,9 @@ const calculateEligibilityDate = (sessionCompletedAt) => {
     throw new Error("Invalid session completion date");
   }
 
-  const eligibleAt = new Date(completedAt);
-
-  eligibleAt.setDate(
-    eligibleAt.getDate() + HOLDING_PERIOD_DAYS
+  const eligibleAt = new Date(
+    completedAt.getTime() +
+      HOLDING_PERIOD_DAYS * MILLISECONDS_PER_DAY
   );
 
   return eligibleAt;
@@ -34,7 +34,7 @@ const isPayoutEligible = ({
   }
 
   return (
-    currentTime >= eligibleAt &&
+    currentTime.getTime() >= eligibleAt.getTime() &&
     !hasActiveDispute &&
     !refundPending
   );
