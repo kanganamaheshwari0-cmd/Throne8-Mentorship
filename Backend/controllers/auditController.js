@@ -93,6 +93,7 @@ const getLedgerEntries = async (req, res) => {
       pageTotals: { debitPaise, creditPaise },
       entries,
     });
+    
   } catch (error) {
     console.error("Get ledger entries error:", error);
 
