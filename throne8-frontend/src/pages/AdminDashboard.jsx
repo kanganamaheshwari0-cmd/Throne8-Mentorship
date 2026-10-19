@@ -54,6 +54,11 @@ function AdminDashboard() {
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
 
+  // Read-only reconciliation report
+  const [reconciliation, setReconciliation] = useState(null);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
+  const [reconciliationError, setReconciliationError] = useState("");
+
   // Earnings Queue finance summary
   const [earningsSummary, setEarningsSummary] = useState(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
@@ -316,6 +321,23 @@ function AdminDashboard() {
     }
   }, []);
 
+  const fetchReconciliation = useCallback(async () => {
+    try {
+      setReconciliationLoading(true);
+      setReconciliationError("");
+
+      const response = await api.get("/admin/reconciliation");
+      setReconciliation(response.data || null);
+    } catch (err) {
+      setReconciliationError(
+        err.response?.data?.message ||
+          "Unable to load reconciliation report."
+      );
+    } finally {
+      setReconciliationLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
@@ -340,6 +362,12 @@ function AdminDashboard() {
       fetchEarningsSummary();
     }
   }, [activeSection, fetchEarningsSummary]);
+
+  useEffect(() => {
+    if (activeSection === "reconciliation") {
+      fetchReconciliation();
+    }
+  }, [activeSection, fetchReconciliation]);
 
   useEffect(() => {
     const handleVerificationUpdate = () => fetchStats();
@@ -644,6 +672,8 @@ function AdminDashboard() {
                     fetchEarningsSummary();
                   } else if (activeSection === "refunds") {
                     fetchRefunds();
+                  } else if (activeSection === "reconciliation") {
+                    fetchReconciliation();
                   } else {
                     fetchStats();
                   }
@@ -653,14 +683,16 @@ function AdminDashboard() {
                   transactionLoading ||
                   commissionLoading ||
                   refundLoading ||
-                  earningsLoading
+                  earningsLoading ||
+                  reconciliationLoading
                 }
               >
                 {loading ||
                 transactionLoading ||
                 commissionLoading ||
                 refundLoading ||
-                earningsLoading
+                earningsLoading ||
+                reconciliationLoading
                   ? "Refreshing..."
                   : "↻ Refresh"}
               </button>
@@ -1165,11 +1197,136 @@ function AdminDashboard() {
             </section>
           )}
 
+          {activeSection === "reconciliation" && (
+            <section>
+              {reconciliationError && (
+                <div className="t8-error" role="alert">
+                  <p>{reconciliationError}</p>
+                  <button
+                    type="button"
+                    className="t8-button"
+                    onClick={fetchReconciliation}
+                    disabled={reconciliationLoading}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              <div className="t8-panel">
+                <div className="t8-page-heading">
+                  <div>
+                    <h2>Payment Reconciliation</h2>
+                    <p>
+                      Compare Razorpay provider records with local payments and financial ledger entries.
+                      This report is read-only and does not modify payments or payouts.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="t8-button"
+                    onClick={fetchReconciliation}
+                    disabled={reconciliationLoading}
+                  >
+                    {reconciliationLoading ? "Refreshing..." : "↻ Refresh report"}
+                  </button>
+                </div>
+
+                {reconciliationLoading && !reconciliation ? (
+                  <div className="t8-loading">Loading reconciliation report...</div>
+                ) : reconciliation?.success ? (
+                  <>
+                    <div className="t8-transaction-summary">
+                      <article className="t8-transaction-metric">
+                        <span>Payments Checked</span>
+                        <strong>{formatNumber(reconciliation.summary?.checked)}</strong>
+                      </article>
+                      <article className="t8-transaction-metric">
+                        <span>Matched</span>
+                        <strong>{formatNumber(reconciliation.summary?.matched)}</strong>
+                      </article>
+                      <article className="t8-transaction-metric">
+                        <span>Review Required</span>
+                        <strong>{formatNumber(reconciliation.summary?.reviewRequired)}</strong>
+                      </article>
+                      <article className="t8-transaction-metric">
+                        <span>Check Failed</span>
+                        <strong>{formatNumber(reconciliation.summary?.checkFailed)}</strong>
+                      </article>
+                    </div>
+
+                    <div className="t8-notice">
+                      <strong>Read-only report:</strong> Refreshing checks provider and local records only.
+                      It does not repair ledgers, change payment statuses, or transfer money.
+                    </div>
+
+                    {Array.isArray(reconciliation.results) && reconciliation.results.length > 0 ? (
+                      <div className="t8-transaction-table-wrap">
+                        <table className="t8-transaction-table">
+                          <thead>
+                            <tr>
+                              <th>Payment / Order</th>
+                              <th>Booking ID</th>
+                              <th>Local Status</th>
+                              <th>Provider Status</th>
+                              <th>Amount</th>
+                              <th>Ledger</th>
+                              <th>Provider Check</th>
+                              <th>Result / Issues</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {reconciliation.results.map((item) => (
+                              <tr key={item.paymentId || item.gatewayOrderId}>
+                                <td>
+                                  <span className="t8-transaction-secondary">Payment ID</span>
+                                  <span className="t8-transaction-id">{item.paymentId || "—"}</span>
+                                  <span className="t8-transaction-secondary">Order ID</span>
+                                  <span className="t8-transaction-id">{item.gatewayOrderId || "—"}</span>
+                                  <span className="t8-transaction-secondary">Gateway payment ID</span>
+                                  <span className="t8-transaction-id">{item.gatewayPaymentId || "Not paid"}</span>
+                                </td>
+                                <td><span className="t8-transaction-id">{item.bookingId || "—"}</span></td>
+                                <td><span className={`t8-payment-status ${statusClass(item.localStatus)}`}>{(item.localStatus || "UNKNOWN").replaceAll("_", " ")}</span></td>
+                                <td>{item.providerStatus || "—"}</td>
+                                <td><span className="t8-transaction-primary">{formatRupees(item.amountPaise)}</span><span className="t8-transaction-secondary">{item.currency || "INR"}</span></td>
+                                <td><span className={`t8-payment-status ${item.ledgerFound ? "captured" : "pending"}`}>{item.ledgerFound ? "Found" : "Missing"}</span></td>
+                                <td>{item.providerCheck || "—"}</td>
+                                <td>
+                                  <span className={`t8-payment-status ${item.result === "MATCHED" ? "captured" : "pending"}`}>{(item.result || "UNKNOWN").replaceAll("_", " ")}</span>
+                                  {Array.isArray(item.issues) && item.issues.length > 0 ? item.issues.map((issue, index) => (
+                                    <span key={issue.code || index} className="t8-transaction-secondary" style={{ marginTop: 6 }}>
+                                      <strong>{issue.code || "Issue"}:</strong> {issue.message || "Review required."}
+                                    </span>
+                                  )) : <span className="t8-transaction-secondary">No issues reported</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="t8-transaction-empty">No reconciliation results were returned.</div>
+                    )}
+
+                    <div className="t8-footer">
+                      {reconciliation.message || "Reconciliation report generated."}
+                      {reconciliation.pagination ? ` Page ${reconciliation.pagination.page || 1} of ${reconciliation.pagination.totalPages || 1}; ${formatNumber(reconciliation.pagination.total)} record(s).` : ""}
+                    </div>
+                  </>
+                ) : !reconciliationLoading && !reconciliationError ? (
+                  <div className="t8-transaction-empty">Reconciliation report is not available yet.</div>
+                ) : null}
+              </div>
+            </section>
+          )}
+
           {activeSection !== "overview" &&
             activeSection !== "transactions" &&
             activeSection !== "commission" &&
             activeSection !== "earnings" &&
-            activeSection !== "refunds" && (
+            activeSection !== "refunds" &&
+            activeSection !== "reconciliation" && (
               <section className="t8-panel">
                 <h2>{activeMenu?.label}</h2>
                 <p>

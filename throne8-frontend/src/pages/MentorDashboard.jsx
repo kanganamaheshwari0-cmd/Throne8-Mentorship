@@ -477,8 +477,10 @@ const getStudentName = (booking) => {
   );
 };
 
+
 const getDate = (booking) => {
   const value =
+    booking?.slotStart ||
     booking?.date ||
     booking?.sessionDate ||
     booking?.bookingDate ||
@@ -496,14 +498,35 @@ const getDate = (booking) => {
   });
 };
 
-const getTime = (booking) =>
-  booking?.time ||
-  booking?.slot ||
-  booking?.sessionTime ||
-  booking?.startTime ||
-  "Time not specified";
+const getTime = (booking) => {
+  const start = booking?.slotStart;
+
+  if (start) {
+    const date = new Date(start);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    }
+  }
+
+  return (
+    booking?.time ||
+    booking?.slot ||
+    booking?.sessionTime ||
+    booking?.startTime ||
+    "Time not specified"
+  );
+};
 
 const getAmount = (item) => {
+  if (item?.pricePaise != null) {
+    const paise = Number(item.pricePaise);
+    return Number.isFinite(paise) ? paise / 100 : 0;
+  }
+
   const value =
     item?.amount ??
     item?.price ??
@@ -527,14 +550,24 @@ const getBookingId = (booking) =>
   booking?._id || booking?.id || booking?.bookingId;
 
 const getSlotEnd = (booking) => {
+  const value =
+    booking?.slotEnd ||
+    booking?.endTime ||
+    booking?.sessionEndTime;
+
+  if (value) {
+    const end = new Date(value);
+    if (!Number.isNaN(end.getTime())) return end;
+  }
+
   const dateValue =
+    booking?.slotStart ||
     booking?.date ||
     booking?.sessionDate ||
     booking?.bookingDate ||
     booking?.slotDate;
 
   const endValue =
-    booking?.slotEnd ||
     booking?.endTime ||
     booking?.sessionEndTime;
 
@@ -543,12 +576,7 @@ const getSlotEnd = (booking) => {
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return null;
 
-  if (typeof endValue === "string" && endValue.includes("T")) {
-    const fullDate = new Date(endValue);
-    return Number.isNaN(fullDate.getTime()) ? null : fullDate;
-  }
-
-  const match = String(endValue).match(/(\\d{1,2}):(\\d{2})\\s*(AM|PM)?/i);
+  const match = String(endValue).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
   if (!match) return null;
 
   let hours = Number(match[1]);
@@ -561,6 +589,7 @@ const getSlotEnd = (booking) => {
   date.setHours(hours, minutes, 0, 0);
   return date;
 };
+
 
 export default function MentorDashboard() {
   const navigate = useNavigate();
@@ -712,11 +741,22 @@ export default function MentorDashboard() {
   const pendingBookings = countByStatus(["pending"]);
   const completedBookings = countByStatus(["completed", "complete"]);
 
-  const earningsAmount = (() => {
+  
+    const earningsAmount = (() => {
     if (typeof earnings === "number" || typeof earnings === "string") {
       return Number(earnings) || 0;
     }
 
+    // The earnings API returns summary amounts in paise.
+    const summary = earnings?.summary;
+
+    if (
+      Number.isFinite(summary?.totalCompletedEarningsPaise)
+    ) {
+      return summary.totalCompletedEarningsPaise / 100;
+    }
+
+    // Legacy API response fallback (amounts already in rupees).
     return Number(
       earnings?.totalEarnings ??
         earnings?.total ??
@@ -728,15 +768,21 @@ export default function MentorDashboard() {
     ) || 0;
   })();
 
-  const isCompleteAllowed = (booking) => {
-    const status = getStatus(booking);
-    if (["completed", "complete", "cancelled", "canceled", "rejected"].includes(status)) {
-      return false;
-    }
+  
+const isCompleteAllowed = (booking) => {
+  const status = getStatus(booking);
 
-    const end = getSlotEnd(booking);
-    return Boolean(end && new Date() >= end);
-  };
+  // Only confirmed sessions can be completed.
+  if (status !== "confirmed") {
+    return false;
+  }
+
+  const end = getSlotEnd(booking);
+
+  // Session must have a valid end time and must have ended.
+  return Boolean(end && new Date() >= end);
+};
+
 
   return (
     <div className="mentor-page">

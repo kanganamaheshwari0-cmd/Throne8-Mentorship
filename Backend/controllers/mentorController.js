@@ -136,6 +136,7 @@ const updateMyMentorProfile = async (req, res) => {
 };
 
 // Get bookings for the logged-in mentor only
+
 const getMyMentorBookings = async (req, res) => {
   try {
     const mentor = await Mentor.findOne({
@@ -153,16 +154,61 @@ const getMyMentorBookings = async (req, res) => {
       mentorId: mentor._id,
     })
       .populate("studentId", "name email")
-      .sort({ slotStart: -1 });
+      .sort({ slotStart: -1 })
+      .lean();
+
+    const bookingIds = bookings.map((booking) => booking._id);
+
+    const payments = await Payment.find({
+      bookingId: { $in: bookingIds },
+    })
+      .select(
+        "_id bookingId status amountPaise currency refundedAmountPaise refunds"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const paymentsByBooking = new Map();
+
+    for (const payment of payments) {
+      const key = payment.bookingId.toString();
+
+      // Keep the latest payment if multiple records exist.
+      if (!paymentsByBooking.has(key)) {
+        paymentsByBooking.set(key, payment);
+      }
+    }
+
+    const bookingsWithPayment = bookings.map((booking) => {
+      const payment = paymentsByBooking.get(
+        booking._id.toString()
+      );
+
+      return {
+        ...booking,
+        payment: payment
+          ? {
+              _id: payment._id,
+              status: payment.status,
+              amountPaise: payment.amountPaise,
+              currency: payment.currency,
+              refundedAmountPaise: payment.refundedAmountPaise,
+              refunds: payment.refunds,
+            }
+          : null,
+        paymentStatus: payment?.status ?? null,
+      };
+    });
 
     return res.status(200).json({
       success: true,
       message: "Mentor bookings fetched successfully",
-      totalBookings: bookings.length,
-      bookings,
+      totalBookings: bookingsWithPayment.length,
+      bookings: bookingsWithPayment,
     });
   } catch (error) {
     console.error("Fetch mentor bookings error:", error.message);
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch mentors bookings",
