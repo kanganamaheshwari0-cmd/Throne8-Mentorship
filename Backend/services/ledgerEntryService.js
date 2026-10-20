@@ -6,6 +6,7 @@ const validateAmount = (value, name) => {
   }
 };
 
+
 const createLines = async ({ base, lines, eventKeyPrefix }) => {
   const debit = lines
     .filter((line) => line.direction === "DEBIT")
@@ -19,35 +20,89 @@ const createLines = async ({ base, lines, eventKeyPrefix }) => {
     throw new Error("Ledger entries are not balanced");
   }
 
+  const expectedEntries = lines.map((line) => ({
+    ...base,
+    ...line,
+    eventKey: `${eventKeyPrefix}:${line.account}:${line.direction}`,
+  }));
+
+  const matchesExpected = (existing, expected) =>
+    existing &&
+    String(existing.bookingId) === String(expected.bookingId) &&
+    String(existing.paymentId) === String(expected.paymentId) &&
+    existing.eventType === expected.eventType &&
+    existing.account === expected.account &&
+    existing.direction === expected.direction &&
+    existing.amountPaise === expected.amountPaise &&
+    existing.currency === expected.currency;
+
   let created = 0;
 
-  for (const line of lines) {
-    const eventKey =
-      `${eventKeyPrefix}:${line.account}:${line.direction}`;
+  for (const expected of expectedEntries) {
+    let existing = await LedgerEntry.findOne({
+      eventKey: expected.eventKey,
+    });
+
+    if (existing) {
+      if (!matchesExpected(existing, expected)) {
+        throw new Error(
+          `Existing ledger entry does not match expected values: ${expected.eventKey}`
+        );
+      }
+      continue;
+    }
 
     try {
-      await LedgerEntry.create({
-        ...base,
-        ...line,
-        eventKey,
-      });
-
+      await LedgerEntry.create(expected);
       created++;
     } catch (error) {
-      if (error.code === 11000) {
-        // Unique eventKey pehle se hai.
-        // Kisi aur database error ko duplicate nahi maana jayega.
-        const existing = await LedgerEntry.findOne({ eventKey });
-
-        if (existing) continue;
+      if (error.code !== 11000) {
+        throw error;
       }
 
-      throw error;
+      // Another request may have created this entry concurrently.
+      existing = await LedgerEntry.findOne({
+        eventKey: expected.eventKey,
+      });
+
+      if (!matchesExpected(existing, expected)) {
+        throw new Error(
+          `Duplicate ledger entry could not be verified: ${expected.eventKey}`
+        );
+      }
     }
   }
 
-  return { created, total: lines.length };
+  // Verify the complete event after inserts/retries.
+  const verifiedEntries = await Promise.all(
+    expectedEntries.map((entry) =>
+      LedgerEntry.findOne({ eventKey: entry.eventKey }).lean()
+    )
+  );
+
+  if (
+    verifiedEntries.some(
+      (entry, index) => !matchesExpected(entry, expectedEntries[index])
+    )
+  ) {
+    throw new Error("Ledger entries are incomplete or inconsistent");
+  }
+
+  const verifiedDebit = verifiedEntries
+    .filter((entry) => entry.direction === "DEBIT")
+    .reduce((sum, entry) => sum + entry.amountPaise, 0);
+
+  const verifiedCredit = verifiedEntries
+    .filter((entry) => entry.direction === "CREDIT")
+    .reduce((sum, entry) => sum + entry.amountPaise, 0);
+
+  if (verifiedDebit !== verifiedCredit) {
+    throw new Error("Verified ledger entries are not balanced");
+  }
+
+  return { created, total: expectedEntries.length };
 };
+
 
 // Captured payment ki balanced ledger entries.
 const recordPaymentCaptured = async ({ booking, payment }) => {

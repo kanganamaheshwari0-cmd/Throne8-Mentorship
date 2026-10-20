@@ -42,6 +42,10 @@ const {
   repairMissingFinancialLedgers,
 } = require("../controllers/financialLedgerRepairController");
 
+const {
+  repairMissingLedgerEntries,
+} = require("../controllers/ledgerEntryRepairController");
+
 const adminOnly = (req, res, next) => {
   if (req.user?.role !== "admin") {
     return res.status(403).json({
@@ -81,6 +85,11 @@ router.get("/transactions", getAdminTransactions);
 
 // Read-only financial reconciliation
 router.get("/reconciliation", getAdminReconciliation);
+
+router.post(
+  "/reconciliation/repair-ledger-entries",
+  repairMissingLedgerEntries
+);
 
 router.post(
   "/reconciliation/repair",

@@ -1,6 +1,6 @@
 
 const Razorpay = require("razorpay");
-
+const LedgerEntry = require("../models/LedgerEntry");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const FinancialLedger = require("../models/FinancialLedger");
@@ -213,6 +213,105 @@ const getAdminReconciliation = async (req, res) => {
         const localRefunds = await Refund.find({
           paymentId: payment._id,
         }).lean();
+
+                // Read-only validation of captured-payment double-entry lines.
+        if (payment.status === "CAPTURED" && ledger) {
+          const expectedLines = [
+            {
+              account: "GATEWAY_CLEARING",
+              direction: "DEBIT",
+              amountPaise: payment.amountPaise,
+            },
+            {
+              account: "PLATFORM_COMMISSION",
+              direction: "CREDIT",
+              amountPaise: ledger.platformCommissionPaise,
+            },
+            {
+              account: "MENTOR_PAYABLE",
+              direction: "CREDIT",
+              amountPaise: ledger.mentorEarningsPaise,
+            },
+          ].filter((line) => line.amountPaise > 0);
+
+          const expectedDebit = expectedLines
+            .filter((line) => line.direction === "DEBIT")
+            .reduce((sum, line) => sum + line.amountPaise, 0);
+
+          const expectedCredit = expectedLines
+            .filter((line) => line.direction === "CREDIT")
+            .reduce((sum, line) => sum + line.amountPaise, 0);
+
+          const actualLines = await LedgerEntry.find({
+            paymentId: payment._id,
+            eventType: "PAYMENT_CAPTURED",
+          }).lean();
+
+          const actualDebit = actualLines
+            .filter((line) => line.direction === "DEBIT")
+            .reduce((sum, line) => sum + line.amountPaise, 0);
+
+          const actualCredit = actualLines
+            .filter((line) => line.direction === "CREDIT")
+            .reduce((sum, line) => sum + line.amountPaise, 0);
+
+          const lineMatches = (expected) =>
+            actualLines.some(
+              (actual) =>
+                sameId(actual.bookingId, payment.bookingId) &&
+                sameId(actual.paymentId, payment._id) &&
+                actual.account === expected.account &&
+                actual.direction === expected.direction &&
+                actual.amountPaise === expected.amountPaise &&
+                actual.currency === payment.currency &&
+                actual.eventKey ===
+                  `PAYMENT_CAPTURED:${payment._id}:${expected.account}:${expected.direction}`
+            );
+
+          const missingLines = expectedLines.filter(
+            (expected) => !lineMatches(expected)
+          );
+
+          const hasUnexpectedLines = actualLines.some(
+            (actual) =>
+              !expectedLines.some(
+                (expected) =>
+                  actual.account === expected.account &&
+                  actual.direction === expected.direction &&
+                  actual.amountPaise === expected.amountPaise &&
+                  sameId(actual.bookingId, payment.bookingId) &&
+                  actual.currency === payment.currency &&
+                  actual.eventKey ===
+                    `PAYMENT_CAPTURED:${payment._id}:${expected.account}:${expected.direction}`
+              )
+          );
+
+          if (
+            missingLines.length > 0 ||
+            hasUnexpectedLines ||
+            actualDebit !== actualCredit ||
+            actualDebit !== expectedDebit ||
+            actualCredit !== expectedCredit
+          ) {
+            issues.push({
+              code: "LEDGER_ENTRIES_INCOMPLETE_OR_UNBALANCED",
+              message:
+                "Double-entry ledger lines are missing, inconsistent, or unbalanced.",
+              details: {
+                expectedLineCount: expectedLines.length,
+                actualLineCount: actualLines.length,
+                missingLines: missingLines.map((line) => ({
+                  account: line.account,
+                  direction: line.direction,
+                  amountPaise: line.amountPaise,
+                })),
+                hasUnexpectedLines,
+                debitPaise: actualDebit,
+                creditPaise: actualCredit,
+              },
+            });
+          }
+        }
 
         const isExpiredUnpaidOrder =
           booking?.status === "EXPIRED" &&

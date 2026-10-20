@@ -59,6 +59,47 @@ function AdminDashboard() {
   const [reconciliationLoading, setReconciliationLoading] = useState(false);
   const [reconciliationError, setReconciliationError] = useState("");
 
+
+  // Audit log
+const [auditLogs, setAuditLogs] = useState([]);
+const [auditLoading, setAuditLoading] = useState(false);
+const [auditError, setAuditError] = useState("");
+const [auditPagination, setAuditPagination] = useState({
+  page: 1,
+  limit: 50,
+  total: 0,
+});
+
+
+  // Failed payouts
+  const [failedPayouts, setFailedPayouts] = useState([]);
+  const [failedPayoutLoading, setFailedPayoutLoading] = useState(false);
+  const [failedPayoutError, setFailedPayoutError] = useState("");
+
+  const fetchFailedPayouts = useCallback(async () => {
+    try {
+      setFailedPayoutLoading(true);
+      setFailedPayoutError("");
+
+      const response = await api.get("/admin/payouts");
+      const records = Array.isArray(response.data.payouts)
+        ? response.data.payouts
+        : [];
+
+      setFailedPayouts(
+        records.filter((payout) => payout.status === "FAILED")
+      );
+    } catch (err) {
+      setFailedPayoutError(
+        err.response?.data?.message ||
+          "Unable to load failed payout records."
+      );
+    } finally {
+      setFailedPayoutLoading(false);
+    }
+  }, []);
+
+
   // Earnings Queue finance summary
   const [earningsSummary, setEarningsSummary] = useState(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
@@ -393,6 +434,45 @@ function AdminDashboard() {
     }
   }, []);
 
+  const fetchAuditLogs = useCallback(async () => {
+  try {
+    setAuditLoading(true);
+    setAuditError("");
+
+    const response = await api.get("/admin/audit-logs", {
+      params: {
+        page: auditPagination.page,
+        limit: auditPagination.limit,
+      },
+    });
+
+    setAuditLogs(
+      Array.isArray(response.data.logs) ? response.data.logs : []
+    );
+
+    setAuditPagination((previous) => ({
+      ...previous,
+      ...(response.data.page ? { page: response.data.page } : {}),
+      ...(response.data.limit ? { limit: response.data.limit } : {}),
+      ...(response.data.total !== undefined
+        ? { total: response.data.total }
+        : {}),
+    }));
+  } catch (err) {
+    setAuditError(
+      err.response?.data?.message || "Unable to load audit logs."
+    );
+  } finally {
+    setAuditLoading(false);
+  }
+}, [auditPagination.page, auditPagination.limit]);
+
+useEffect(() => {
+  if (activeSection === "audit") {
+    fetchAuditLogs();
+  }
+}, [activeSection, fetchAuditLogs]);
+
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
@@ -417,6 +497,12 @@ function AdminDashboard() {
       fetchEarningsSummary();
     }
   }, [activeSection, fetchEarningsSummary]);
+
+    useEffect(() => {
+    if (activeSection === "failed") {
+      fetchFailedPayouts();
+    }
+  }, [activeSection, fetchFailedPayouts]);
 
   useEffect(() => {
     if (activeSection === "reconciliation") {
@@ -607,6 +693,45 @@ function AdminDashboard() {
         .t8-panel{padding:23px;border:1px solid var(--border);border-radius:15px;background:var(--panel);min-width:0;margin-bottom:20px}
         .t8-panel h2,.t8-panel h3{margin:0 0 10px}
         .t8-panel p{color:var(--muted);line-height:1.7}
+        .t8-audit-table {
+         width: 100%;
+         min-width: 1100px;
+         border-collapse: separate;
+         border-spacing: 0;
+         table-layout: auto;
+         }
+
+         .t8-audit-table th,
+         .t8-audit-table td {
+           padding: 14px 16px;
+           text-align: left;
+           vertical-align: top;
+           border-bottom: 1px solid var(--border);
+           white-space: normal;
+           overflow-wrap: anywhere;
+           line-height: 1.6;
+         }
+         
+         .t8-audit-table th {
+           color: var(--muted);
+           font-size: 12px;
+           font-weight: 700;
+         }
+         
+         .t8-audit-table td {
+           font-size: 13px;
+         }
+         
+         .t8-audit-table pre {
+           white-space: pre-wrap;
+           overflow-wrap: anywhere;
+           word-break: break-word;
+           min-width: 180px;
+           max-width: 260px;
+           margin: 0;
+           line-height: 1.6;
+           font-size: 12px;
+         }
         .t8-action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
         .t8-action-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:22px;border:1px solid var(--border);border-radius:14px;background:var(--panel)}
         .t8-action-card h3{margin:0;font-size:17px}.t8-action-card p{flex:1;margin:0 0 9px;color:var(--muted);font-size:13px;line-height:1.7}
@@ -727,8 +852,12 @@ function AdminDashboard() {
                     fetchEarningsSummary();
                   } else if (activeSection === "refunds") {
                     fetchRefunds();
+                  } else if (activeSection === "failed") {
+                    fetchFailedPayouts();
                   } else if (activeSection === "reconciliation") {
                     fetchReconciliation();
+                  } else if (activeSection === "audit") {
+                    fetchAuditLogs();
                   } else {
                     fetchStats();
                   }
@@ -739,7 +868,9 @@ function AdminDashboard() {
                   commissionLoading ||
                   refundLoading ||
                   earningsLoading ||
-                  reconciliationLoading
+                  failedPayoutLoading ||
+                  reconciliationLoading ||
+                  auditLoading
                 }
               >
                 {loading ||
@@ -747,6 +878,7 @@ function AdminDashboard() {
                 commissionLoading ||
                 refundLoading ||
                 earningsLoading ||
+                 failedPayoutLoading ||
                 reconciliationLoading
                   ? "Refreshing..."
                   : "↻ Refresh"}
@@ -1394,7 +1526,26 @@ function AdminDashboard() {
                                 <td><span className={`t8-payment-status ${statusClass(item.localStatus)}`}>{(item.localStatus || "UNKNOWN").replaceAll("_", " ")}</span></td>
                                 <td>{item.providerStatus || "—"}</td>
                                 <td><span className="t8-transaction-primary">{formatRupees(item.amountPaise)}</span><span className="t8-transaction-secondary">{item.currency || "INR"}</span></td>
-                                <td><span className={`t8-payment-status ${item.ledgerFound ? "captured" : "pending"}`}>{item.ledgerFound ? "Found" : "Missing"}</span></td>
+                                {/* <td><span className={`t8-payment-status ${item.ledgerFound ? "captured" : "pending"}`}>{item.ledgerFound ? "Found" : "Missing"}</span></td> */}
+                                
+                                 <td>
+                                   <span
+                                     className={`t8-payment-status ${
+                                       item.result === "NOT_APPLICABLE"
+                                         ? "captured"
+                                         : item.ledgerFound
+                                           ? "captured"
+                                           : "pending"
+                                     }`}
+                                   >
+                                     {item.result === "NOT_APPLICABLE"
+                                       ? "Not required"
+                                       : item.ledgerFound
+                                         ? "Found"
+                                         : "Missing"}
+                                   </span>
+                                 </td>
+
                                 <td>{item.providerCheck || "—"}</td>
                                 <td>
                                   <span className={`t8-payment-status ${item.result === "MATCHED" ? "captured" : "pending"}`}>{(item.result || "UNKNOWN").replaceAll("_", " ")}</span>
@@ -1425,12 +1576,255 @@ function AdminDashboard() {
             </section>
           )}
 
+          {activeSection === "audit" && (
+  <section className="t8-panel">
+    <div className="t8-section-header">
+      <div>
+        <h2>Audit Log</h2>
+        <p>Admin actions and recorded changes</p>
+      </div>
+
+      <button
+        type="button"
+        className="t8-button"
+        onClick={fetchAuditLogs}
+        disabled={auditLoading}
+      >
+        {auditLoading ? "Loading..." : "Refresh"}
+      </button>
+    </div>
+
+    {auditError && (
+      <div className="t8-error">{auditError}</div>
+    )}
+
+    {auditLoading && (
+      <div className="t8-loading">Loading audit logs...</div>
+    )}
+
+    {!auditLoading && !auditError && auditLogs.length === 0 && (
+      <div className="t8-transaction-empty">
+        No audit records found.
+      </div>
+    )}
+
+    {auditLogs.length > 0 && (
+      <div
+  className="t8-table-wrap"
+  style={{ overflowX: "auto", width: "100%" }}
+>
+  {/* <table
+    className="t8-table" */}
+
+    <table
+  className="t8-audit-table"
+    style={{
+      minWidth: "1100px",
+      tableLayout: "auto",
+      borderCollapse: "separate",
+      borderSpacing: "0",
+    }}
+  >
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Before</th>
+              <th>After</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {auditLogs.map((log) => (
+              <tr key={log._id}>
+                <td>
+                  {log.timestamp
+                    ? new Date(log.timestamp).toLocaleString()
+                    : "—"}
+                </td>
+
+                <td>
+                  <strong>{log.actorId?.name || "Unknown"}</strong>
+                  <br />
+                  {log.actorId?.email || "—"}
+                  <br />
+                  {log.actorRole || log.actorId?.role || "—"}
+                </td>
+
+                <td>{log.action || "—"}</td>
+
+                <td>
+                  {log.targetType || "—"}
+                  <br />
+                  <small>{log.targetId || "—"}</small>
+                </td>
+
+                <td>
+                  {/* <pre style={{ whiteSpace: "pre-wrap", maxWidth: "220px" }}> */}
+                  <pre
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      minWidth: "180px",
+                      maxWidth: "260px",
+                      margin: 0,
+                      lineHeight: 1.6,
+                      fontSize: "12px",
+                    }}
+                      >
+                    {log.before
+                      ? JSON.stringify(log.before, null, 2)
+                      : "—"}
+                  </pre>
+                </td>
+
+                <td>
+                  {/* <pre style={{ whiteSpace: "pre-wrap", maxWidth: "220px" }}> */}
+
+
+                  <pre
+                     style={{
+                       whiteSpace: "pre-wrap",
+                       overflowWrap: "anywhere",
+                       wordBreak: "break-word",
+                       minWidth: "180px",
+                       maxWidth: "260px",
+                       margin: 0,
+                       lineHeight: 1.6,
+                       fontSize: "12px",
+                     }}
+                      >
+                    {log.after
+                      ? JSON.stringify(log.after, null, 2)
+                      : "—"}
+                  </pre>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    <div className="t8-footer">
+      {auditPagination.total} record(s) · Page {auditPagination.page}
+    </div>
+  </section>
+)}
+
+{activeSection === "failed" && (
+  <section className="t8-panel">
+    <div className="t8-page-heading">
+      <div>
+        <h2>Failed payouts</h2>
+        <p>Review payout failures and the reasons recorded by the system.</p>
+      </div>
+
+      <button
+        type="button"
+        className="t8-button"
+        onClick={fetchFailedPayouts}
+        disabled={failedPayoutLoading}
+      >
+        {failedPayoutLoading ? "Refreshing..." : "↻ Refresh"}
+      </button>
+    </div>
+
+    {failedPayoutError && (
+      <div className="t8-error" role="alert">
+        <p>{failedPayoutError}</p>
+        <button
+          type="button"
+          className="t8-button"
+          onClick={fetchFailedPayouts}
+          disabled={failedPayoutLoading}
+        >
+          Try again
+        </button>
+      </div>
+    )}
+
+    <div className="t8-transaction-summary">
+      <div className="t8-summary-card">
+        <span>Failed payout records</span>
+        <strong>{failedPayouts.length}</strong>
+      </div>
+      <div className="t8-summary-card">
+        <span>Total failed amount</span>
+        <strong>
+          {formatRupees(
+            failedPayouts.reduce(
+              (total, payout) => total + Number(payout.amountPaise || 0),
+              0
+            )
+          )}
+        </strong>
+      </div>
+    </div>
+
+    {failedPayoutLoading && failedPayouts.length === 0 ? (
+      <div className="t8-loading">Loading failed payouts...</div>
+    ) : failedPayouts.length === 0 && !failedPayoutError ? (
+      <div className="t8-transaction-empty">
+        <strong>No failed payouts recorded.</strong>
+        <br />
+        Failed payout records will appear here if a payout fails.
+      </div>
+    ) : failedPayouts.length > 0 ? (
+      <div className="t8-transaction-table-wrap">
+        <table className="t8-transaction-table">
+          <thead>
+            <tr>
+              <th>Mentor</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Failure reason</th>
+              <th>Booking ID</th>
+              <th>Created at</th>
+            </tr>
+          </thead>
+          <tbody>
+            {failedPayouts.map((payout) => (
+              <tr key={payout._id}>
+                <td>
+                  <strong>
+                    {payout.mentorId?.userId?.name || "Unknown mentor"}
+                  </strong>
+                  <div className="t8-transaction-secondary">
+                    {payout.mentorId?.userId?.email || "—"}
+                  </div>
+                </td>
+                <td>{formatRupees(payout.amountPaise)}</td>
+                <td>
+                  <span className="t8-status failed">{payout.status}</span>
+                </td>
+                <td>{payout.failureReason || "No reason recorded"}</td>
+                <td>{payout.bookingId?._id || payout.bookingId || "—"}</td>
+                <td>{formatDateTime(payout.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : null}
+
+    <div className="t8-footer">
+      Read-only review. No payout is initiated or transferred from this page.
+    </div>
+  </section>
+)}
+
           {activeSection !== "overview" &&
+          activeSection !== "failed" &&
             activeSection !== "transactions" &&
             activeSection !== "commission" &&
             activeSection !== "earnings" &&
             activeSection !== "refunds" &&
-            activeSection !== "reconciliation" && (
+            activeSection !== "reconciliation" &&
+            activeSection !== "audit" && (
               <section className="t8-panel">
                 <h2>{activeMenu?.label}</h2>
                 <p>
