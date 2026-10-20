@@ -104,9 +104,23 @@ function AdminDashboard() {
   const [commissionOverview, setCommissionOverview] = useState(null);
   const [commissionRecords, setCommissionRecords] = useState([]);
   const [commissionLoading, setCommissionLoading] = useState(false);
+
+
+  //refund
+
   const [refunds, setRefunds] = useState([]);
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundError, setRefundError] = useState("");
+  
+  const [refundCandidates, setRefundCandidates] = useState([]);
+  const [refundPaymentId, setRefundPaymentId] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [refundMessage, setRefundMessage] = useState("");
+  const [refundReconciliationRequired, setRefundReconciliationRequired] =
+  useState(false);
+
+
   const [commissionError, setCommissionError] = useState("");
   const [commissionMessage, setCommissionMessage] = useState("");
   const [commissionSearch, setCommissionSearch] = useState("");
@@ -321,6 +335,47 @@ function AdminDashboard() {
     }
   }, []);
 
+
+       const fetchRefundCandidates = useCallback(async () => {
+    try {
+      setRefundError("");
+      setRefundMessage("");
+
+      const response = await api.get("/admin/transactions", {
+        params: { page: 1, limit: 100, status: "CAPTURED" },
+      });
+
+      const payments = Array.isArray(response.data.transactions)
+        ? response.data.transactions
+        : [];
+
+      const eligiblePayments = payments.filter(
+        (payment) =>
+          payment.status === "CAPTURED" &&
+          payment.gatewayPaymentId &&
+          Number(payment.amountPaise) > 0 &&
+          Number(payment.refundedAmountPaise || 0) === 0
+      );
+
+      setRefundCandidates(eligiblePayments);
+
+      if (eligiblePayments.length === 0) {
+        setRefundMessage("No eligible captured payments found.");
+      } else {
+        setRefundMessage(
+          `${eligiblePayments.length} captured payment(s) loaded.`
+        );
+      }
+    } catch (err) {
+      setRefundError(
+        err.response?.data?.message ||
+          err.message ||
+          "Unable to load captured payments."
+      );
+    }
+  }, []);
+
+    
   const fetchReconciliation = useCallback(async () => {
     try {
       setReconciliationLoading(true);
@@ -1090,6 +1145,55 @@ function AdminDashboard() {
                 >
                   {refundLoading ? "Refreshing..." : "↻ Refresh"}
                 </button>
+              </div>
+
+                            <div className="t8-notice">
+                <strong>Refund request:</strong> Only submit after reviewing
+                the captured payment. Submitting sends a request to Razorpay.
+              </div>
+
+              <div className="t8-transaction-filters">
+                <label htmlFor="refund-payment">Captured payment</label>
+                <select
+                  id="refund-payment"
+                  value={refundPaymentId}
+                  onChange={(event) => setRefundPaymentId(event.target.value)}
+                >
+                  <option value="">Select a payment</option>
+                  {refundCandidates.map((payment) => (
+                    <option key={payment._id} value={payment._id}>
+                      {payment.gatewayPaymentId} —{" "}
+                      {formatRupees(payment.amountPaise)}
+                    </option>
+                  ))}
+                </select>
+
+                <label htmlFor="refund-reason">Refund reason</label>
+                <textarea
+                  id="refund-reason"
+                  value={refundReason}
+                  onChange={(event) => setRefundReason(event.target.value)}
+                  minLength={3}
+                  maxLength={500}
+                  placeholder="Enter the reason for this refund"
+                />
+
+                <button
+                  type="button"
+                  className="t8-button"
+                  disabled={refundSubmitting}
+                  onClick={fetchRefundCandidates}
+                >
+                  Load captured payments
+                </button>
+
+                                {refundMessage && (
+                  <p className="t8-transaction-secondary" role="status">
+                    {refundMessage}
+                  </p>
+                )}
+
+
               </div>
 
               {refundError && (
