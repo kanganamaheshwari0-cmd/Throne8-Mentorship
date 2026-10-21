@@ -1554,10 +1554,12 @@ useEffect(() => {
                                       <strong>{issue.code || "Issue"}:</strong> {issue.message || "Review required."}
                                     </span>
                                   )) : <span className="t8-transaction-secondary">No issues reported</span>}
+
                                 </td>
                               </tr>
                             ))}
                           </tbody>
+
                         </table>
                       </div>
                     ) : (
@@ -1568,10 +1570,12 @@ useEffect(() => {
                       {reconciliation.message || "Reconciliation report generated."}
                       {reconciliation.pagination ? ` Page ${reconciliation.pagination.page || 1} of ${reconciliation.pagination.totalPages || 1}; ${formatNumber(reconciliation.pagination.total)} record(s).` : ""}
                     </div>
+
                   </>
                 ) : !reconciliationLoading && !reconciliationError ? (
                   <div className="t8-transaction-empty">Reconciliation report is not available yet.</div>
                 ) : null}
+
               </div>
             </section>
           )}
@@ -1579,6 +1583,7 @@ useEffect(() => {
           {activeSection === "audit" && (
   <section className="t8-panel">
     <div className="t8-section-header">
+
       <div>
         <h2>Audit Log</h2>
         <p>Admin actions and recorded changes</p>
@@ -1590,6 +1595,7 @@ useEffect(() => {
         onClick={fetchAuditLogs}
         disabled={auditLoading}
       >
+        
         {auditLoading ? "Loading..." : "Refresh"}
       </button>
     </div>
