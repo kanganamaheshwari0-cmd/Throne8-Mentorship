@@ -545,6 +545,7 @@ const approvePayout = async (req, res) => {
       new Date(payout.payoutEligibleAt).getTime() !==
         eligibleAt.getTime()
     ) {
+      
       return res.status(409).json({
         success: false,
         message: "Payout eligibility date does not match completion date",
