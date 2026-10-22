@@ -22,8 +22,7 @@ const ACTIVE_PAYOUT_STATUSES = [
   "PROCESSING",
   "PAID",
 ];
-
-// Shared service ensures consistent 15-day UTC eligibility calculation.
+// Shared service ensures consistent UTC payout eligibility calculation.
 const getEligibilityDate = calculateEligibilityDate;
 
 // Validate the ledger's financial amounts.
@@ -412,7 +411,7 @@ const generateEligiblePayouts = async (req, res) => {
 
         results.push({
           bookingId: booking._id,
-          reason: "15-day waiting period has not ended",
+          reason: "Payout holding period has not ended",
           payoutEligibleAt: eligibleAt,
         });
 
@@ -556,7 +555,7 @@ const approvePayout = async (req, res) => {
     if (eligibleAt > new Date()) {
       return res.status(409).json({
         success: false,
-        message: "The 15-day payout waiting period has not ended",
+        message: "The payout holding period has not ended",
         payoutEligibleAt: eligibleAt,
       });
     }

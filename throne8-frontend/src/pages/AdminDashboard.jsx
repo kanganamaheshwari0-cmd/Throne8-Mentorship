@@ -54,11 +54,12 @@ function AdminDashboard() {
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
 
-  // Read-only reconciliation report
-  const [reconciliation, setReconciliation] = useState(null);
-  const [reconciliationLoading, setReconciliationLoading] = useState(false);
-  const [reconciliationError, setReconciliationError] = useState("");
-
+ // Read-only reconciliation report
+const [reconciliation, setReconciliation] = useState(null);
+const [reconciliationLoading, setReconciliationLoading] = useState(false);
+const [reconciliationError, setReconciliationError] = useState("");
+const [reconciliationPage, setReconciliationPage] = useState(1);
+const reconciliationLimit = 2;
 
   // Audit log
 const [auditLogs, setAuditLogs] = useState([]);
@@ -417,22 +418,28 @@ const [auditPagination, setAuditPagination] = useState({
   }, []);
 
     
-  const fetchReconciliation = useCallback(async () => {
-    try {
-      setReconciliationLoading(true);
-      setReconciliationError("");
+ const fetchReconciliation = useCallback(async () => {
+  try {
+    setReconciliationLoading(true);
+    setReconciliationError("");
 
-      const response = await api.get("/admin/reconciliation");
-      setReconciliation(response.data || null);
-    } catch (err) {
-      setReconciliationError(
-        err.response?.data?.message ||
-          "Unable to load reconciliation report."
-      );
-    } finally {
-      setReconciliationLoading(false);
-    }
-  }, []);
+    const response = await api.get("/admin/reconciliation", {
+      params: {
+        page: reconciliationPage,
+        limit: reconciliationLimit,
+      },
+    });
+
+    setReconciliation(response.data || null);
+  } catch (err) {
+    setReconciliationError(
+      err.response?.data?.message ||
+        "Unable to load reconciliation report."
+    );
+  } finally {
+    setReconciliationLoading(false);
+  }
+}, [reconciliationPage]);
 
   const fetchAuditLogs = useCallback(async () => {
   try {
@@ -1178,8 +1185,8 @@ useEffect(() => {
                   <div>
                     <h2>Mentor Earnings Queue</h2>
                     <p>
-                      Track completed session earnings and the 15-day payout
-                      eligibility period.
+                      Track completed session earnings and the payout holding
+                      period for demo testing.
                     </p>
                   </div>
                   <button
@@ -1235,11 +1242,12 @@ useEffect(() => {
                     </div>
 
                     <div className="t8-notice">
-                      <strong>15-day payout rule:</strong> Earnings remain
-                      pending until the eligibility period ends. Eligible
-                      earnings may then proceed through payout generation and
-                      admin approval. Approval alone does not transfer money.
-                    </div>
+                     <strong>1-minute demo payout rule:</strong> Earnings remain
+                     pending until one minute after the session completion time.
+                     Once eligible, earnings may proceed through payout generation
+                     and admin approval. Approval alone does not transfer money.
+                     Active disputes and pending refunds continue to block eligibility.
+                   </div>
 
                     <div className="t8-heading-actions">
                       <button
@@ -1471,25 +1479,40 @@ useEffect(() => {
                 {reconciliationLoading && !reconciliation ? (
                   <div className="t8-loading">Loading reconciliation report...</div>
                 ) : reconciliation?.success ? (
-                  <>
-                    <div className="t8-transaction-summary">
-                      <article className="t8-transaction-metric">
-                        <span>Payments Checked</span>
-                        <strong>{formatNumber(reconciliation.summary?.checked)}</strong>
-                      </article>
-                      <article className="t8-transaction-metric">
-                        <span>Matched</span>
-                        <strong>{formatNumber(reconciliation.summary?.matched)}</strong>
-                      </article>
-                      <article className="t8-transaction-metric">
-                        <span>Review Required</span>
-                        <strong>{formatNumber(reconciliation.summary?.reviewRequired)}</strong>
-                      </article>
-                      <article className="t8-transaction-metric">
-                        <span>Check Failed</span>
-                        <strong>{formatNumber(reconciliation.summary?.checkFailed)}</strong>
-                      </article>
-                    </div>
+                  <>  
+                   
+                     <div className="t8-transaction-summary">
+                       <article className="t8-transaction-metric">
+                         <span>Payments Checked (Current Page)</span>
+                         <strong>{formatNumber(reconciliation.summary?.checked)}</strong>
+                       </article>
+                     
+                       <article className="t8-transaction-metric">
+                         <span>Provider Checked</span>
+                         <strong>{formatNumber(reconciliation.summary?.providerChecked)}</strong>
+                       </article>
+                     
+                       <article className="t8-transaction-metric">
+                         <span>Review Required</span>
+                         <strong>{formatNumber(reconciliation.summary?.reviewRequired)}</strong>
+                       </article>
+                     
+                       <article className="t8-transaction-metric">
+                         <span>Check Failed</span>
+                         <strong>{formatNumber(reconciliation.summary?.checkFailed)}</strong>
+                       </article>
+                     
+                       <article className="t8-transaction-metric">
+                         <span>Not Checked</span>
+                         <strong>{formatNumber(reconciliation.summary?.notChecked)}</strong>
+                       </article>
+                     
+                       <article className="t8-transaction-metric">
+                         <span>Missing References</span>
+                         <strong>{formatNumber(reconciliation.summary?.missingReferences)}</strong>
+                       </article>
+                     </div>
+
 
                     <div className="t8-notice">
                       <strong>Read-only report:</strong> Refreshing checks provider and local records only.
@@ -1566,11 +1589,63 @@ useEffect(() => {
                       <div className="t8-transaction-empty">No reconciliation results were returned.</div>
                     )}
 
-                    <div className="t8-footer">
-                      {reconciliation.message || "Reconciliation report generated."}
-                      {reconciliation.pagination ? ` Page ${reconciliation.pagination.page || 1} of ${reconciliation.pagination.totalPages || 1}; ${formatNumber(reconciliation.pagination.total)} record(s).` : ""}
-                    </div>
-
+                   <div className="t8-footer">
+                   {reconciliation.message || "Reconciliation report generated."}
+                   {reconciliation.pagination
+                     ? ` Page ${reconciliation.pagination.page || 1} of ${reconciliation.pagination.totalPages || 1}; ${formatNumber(reconciliation.pagination.total)} record(s).`
+                     : ""}
+                 </div>
+                 
+                 {reconciliation.pagination && (
+                   <div
+                     style={{
+                       display: "flex",
+                       justifyContent: "flex-end",
+                       alignItems: "center",
+                       gap: 10,
+                       marginTop: 14,
+                     }}
+                   >
+                     <button
+                       type="button"
+                       className="t8-btn-secondary"
+                       disabled={
+                         reconciliationLoading ||
+                         reconciliationPage <= 1
+                       }
+                       onClick={() =>
+                         setReconciliationPage((page) => Math.max(1, page - 1))
+                       }
+                     >
+                       Previous
+                     </button>
+                 
+                     <span className="t8-transaction-secondary">
+                       Page {reconciliation.pagination.page || 1} of{" "}
+                       {Math.max(1, reconciliation.pagination.totalPages || 1)}
+                     </span>
+                 
+                     <button
+                       type="button"
+                       className="t8-btn-secondary"
+                       disabled={
+                         reconciliationLoading ||
+                         reconciliationPage >=
+                           (reconciliation.pagination.totalPages || 1)
+                       }
+                       onClick={() =>
+                         setReconciliationPage((page) =>
+                           Math.min(
+                             reconciliation.pagination.totalPages || 1,
+                             page + 1
+                           )
+                         )
+                       }
+                     >
+                       Next
+                     </button>
+                   </div>
+                 )}
                   </>
                 ) : !reconciliationLoading && !reconciliationError ? (
                   <div className="t8-transaction-empty">Reconciliation report is not available yet.</div>
@@ -1753,6 +1828,15 @@ useEffect(() => {
       </div>
     )}
 
+    {reconciliation.pagination && (
+  <p className="t8-transaction-secondary">
+    Showing page {reconciliation.pagination.page} of{" "}
+    {Math.max(1, reconciliation.pagination.totalPages)} ·
+    {" "}{reconciliation.results?.length || 0} records on this page
+    {" "}· {reconciliation.pagination.total} total records
+  </p>
+)}
+
     <div className="t8-transaction-summary">
       <div className="t8-summary-card">
         <span>Failed payout records</span>
@@ -1831,30 +1915,117 @@ useEffect(() => {
             activeSection !== "refunds" &&
             activeSection !== "reconciliation" &&
             activeSection !== "audit" && (
-              <section className="t8-panel">
-                <h2>{activeMenu?.label}</h2>
-                <p>
-                  {activeSection === "failed" &&
-                    "Open Mentor Payouts to review available payout records. Failed-payout filtering requires the corresponding records and status data."}
-                  {activeSection === "reconciliation" &&
-                    "Provider-versus-ledger reconciliation needs a backend reconciliation endpoint and recorded discrepancy data."}
-                  {activeSection === "audit" &&
-                    "The audit log needs its connected backend endpoint to display real actors, timestamps and recorded changes."}
-                </p>
-                {activeSection === "failed" && (
-                  <button
-                    type="button"
-                    className="t8-button primary"
-                    onClick={() => navigate("/admin/payouts")}
-                  >
-                    Open Mentor Payouts →
-                  </button>
-                )}
-                <div className="t8-footer">
-                  This section requires its corresponding backend integration
-                  to display and manage real records.
-                </div>
-              </section>
+              
+<section className="t8-panel">
+  <div className="t8-section-heading">
+    <div>
+      <h2>Failed payouts</h2>
+      <p>
+        Review failed payout records and inspect their details.
+        No payout transfers are initiated from this page.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      className="t8-button primary"
+      onClick={fetchFailedPayouts}
+      disabled={failedPayoutLoading}
+    >
+      {failedPayoutLoading ? "Refreshing..." : "↻ Refresh"}
+    </button>
+  </div>
+
+  {failedPayoutError && (
+    <div className="t8-error" role="alert">
+      {failedPayoutError}
+    </div>
+  )}
+
+  {failedPayoutLoading ? (
+    <p>Loading failed payout records...</p>
+  ) : failedPayoutError ? (
+    <p>Failed payout records could not be loaded. Try refreshing.</p>
+  ) : failedPayouts.length === 0 ? (
+    <div className="t8-empty-state">
+      <h3>No failed payouts found</h3>
+      <p>
+        The connected API returned no payouts with FAILED status.
+        This does not create or change any payout records.
+      </p>
+      <button
+        type="button"
+        className="t8-button secondary"
+        onClick={() => navigate("/admin/payouts")}
+      >
+        Open Mentor Payouts →
+      </button>
+    </div>
+  ) : (
+    <div className="t8-table-wrap">
+      <table className="t8-table">
+        <thead>
+          <tr>
+            <th>Payout ID</th>
+            <th>Mentor</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Failure details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {failedPayouts.map((payout) => (
+            <tr key={payout._id || payout.id}>
+              <td>
+                <span className="t8-transaction-id">
+                  {payout._id || payout.id || "—"}
+                </span>
+              </td>
+              <td>
+                {payout.mentor?.name ||
+                  payout.mentorName ||
+                  payout.mentorId?.name ||
+                  "—"}
+              </td>
+              <td>
+                {Number.isFinite(Number(payout.amountPaise))
+                  ? `₹${(Number(payout.amountPaise) / 100).toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : Number.isFinite(Number(payout.amount))
+                    ? `₹${Number(payout.amount).toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                    : "—"}
+              </td>
+              <td>
+                <span className="t8-payment-status failed">
+                  {payout.status || "FAILED"}
+                </span>
+              </td>
+              <td>
+                {payout.createdAt
+                  ? new Date(payout.createdAt).toLocaleString("en-IN")
+                  : "—"}
+              </td>
+              <td>
+                {payout.failureReason ||
+                  payout.failureMessage ||
+                  payout.errorMessage ||
+                  payout.notes ||
+                  "No failure details recorded"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</section>
+
             )}
 
           <footer className="t8-footer">

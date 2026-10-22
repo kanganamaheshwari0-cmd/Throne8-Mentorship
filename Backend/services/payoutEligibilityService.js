@@ -1,6 +1,9 @@
 
-const HOLDING_PERIOD_DAYS = 15;
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const HOLDING_PERIOD_MINUTES = Number(
+  process.env.PAYOUT_HOLDING_PERIOD_MINUTES || 1
+);
+
+const MILLISECONDS_PER_MINUTE = 60 * 1000;
 
 const calculateEligibilityDate = (sessionCompletedAt) => {
   const completedAt = new Date(sessionCompletedAt);
@@ -9,12 +12,19 @@ const calculateEligibilityDate = (sessionCompletedAt) => {
     throw new Error("Invalid session completion date");
   }
 
-  const eligibleAt = new Date(
-    completedAt.getTime() +
-      HOLDING_PERIOD_DAYS * MILLISECONDS_PER_DAY
-  );
+  if (
+    !Number.isSafeInteger(HOLDING_PERIOD_MINUTES) ||
+    HOLDING_PERIOD_MINUTES < 1
+  ) {
+    throw new Error(
+      "PAYOUT_HOLDING_PERIOD_MINUTES must be a positive integer"
+    );
+  }
 
-  return eligibleAt;
+  return new Date(
+    completedAt.getTime() +
+      HOLDING_PERIOD_MINUTES * MILLISECONDS_PER_MINUTE
+  );
 };
 
 const isPayoutEligible = ({
@@ -41,7 +51,7 @@ const isPayoutEligible = ({
 };
 
 module.exports = {
-  HOLDING_PERIOD_DAYS,
+  HOLDING_PERIOD_MINUTES,
   calculateEligibilityDate,
   isPayoutEligible,
 };

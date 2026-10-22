@@ -64,45 +64,71 @@ function Home() {
         </nav>
 
         {/* Login status ke according buttons */}
-        <div className="nav-actions">
-          {user ? (
-            <>
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => navigate("/dashboard")}
-              >
-                My Dashboard
-              </button>
+        
+<div className="nav-actions">
+  {user ? (
+    <>
+      <button
+        type="button"
+        className="btn btn-outline"
+        onClick={() => {
+          if (user.role === "admin") {
+            navigate("/admin-dashboard");
+          } else if (user.role === "mentor") {
+            navigate("/mentor-dashboard");
+          } else {
+            navigate("/dashboard");
+          }
+        }}
+      >
+        My Dashboard
+      </button>
 
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => navigate("/login")}
-              >
-                Login
-              </button>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={handleLogout}
+      >
+        Logout
+      </button>
+    </>
+  ) : (
+    <>
+      <button
+        type="button"
+        className="btn btn-outline"
+        onClick={() => navigate("/login")}
+      >
+        Student Login
+      </button>
 
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate("/register")}
-              >
-                Get Started
-              </button>
-            </>
-          )}
-        </div>
+      <button
+        type="button"
+        className="btn btn-outline"
+        onClick={() => navigate("/login")}
+      >
+        Mentor Login
+      </button>
+
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={() => navigate("/login")}
+      >
+        Admin Login
+      </button>
+
+      <button
+        type="button"
+        className="btn btn-outline"
+        onClick={() => navigate("/register")}
+      >
+        Get Started
+      </button>
+    </>
+  )}
+</div>
+
       </header>
 
       <main>
@@ -275,7 +301,9 @@ function NotFound() {
 function App() {
   return (
     <Routes>
+      {/* <Route path="/" element={<Home />} /> */}
       <Route path="/" element={<Home />} />
+      <Route path="/home" element={<Home />} />
 
       <Route path="/login" element={<Login />} />
 

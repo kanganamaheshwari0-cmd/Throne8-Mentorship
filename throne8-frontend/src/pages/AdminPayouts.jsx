@@ -57,7 +57,8 @@ export default function AdminPayouts() {
 
   const token = localStorage.getItem("throne8_token");
 
-  const request = async (path, options = {}) => {
+  // const request = async (path, options = {}) => {
+    const request = useCallback(async (path, options = {}) => {
     const response = await fetch(`${API}${path}`, {
       ...options,
       headers: {
@@ -73,8 +74,10 @@ export default function AdminPayouts() {
       throw new Error(data.message || "Request failed");
     }
 
-    return data;
-  };
+  //   return data;
+  // };
+      return data;
+  }, [token]);
 
   const loadPayouts = useCallback(async () => {
     setLoading(true);
@@ -103,7 +106,8 @@ export default function AdminPayouts() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  // }, [token]);
+    }, [request]);
 
   useEffect(() => {
     loadPayouts();

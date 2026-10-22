@@ -230,6 +230,7 @@ const recordRefundSucceeded = async ({
 };
 
 // Ledger error ko log karo taaki reconciliation mein pakda ja sake.
+
 const tryRecordPaymentCaptured = async ({ booking, payment }) => {
   try {
     return await recordPaymentCaptured({ booking, payment });
@@ -243,9 +244,11 @@ const tryRecordPaymentCaptured = async ({ booking, payment }) => {
       })
     );
 
-    return null;
+    // Do not hide accounting failure from the caller.
+    throw error;
   }
 };
+
 
 module.exports = {
   recordPaymentCaptured,

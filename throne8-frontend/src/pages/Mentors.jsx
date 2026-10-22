@@ -60,6 +60,7 @@ export default function Mentors() {
   const [selectedMentor, setSelectedMentor] = useState(null);
   const [slotStart, setSlotStart] = useState("");
   const [slotEnd, setSlotEnd] = useState("");
+  const [minSlotStart, setMinSlotStart] = useState("");
 
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState("");
@@ -69,6 +70,12 @@ export default function Mentors() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
+
+    useEffect(() => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    setMinSlotStart(now.toISOString().slice(0, 16));
+  }, []);
 
   useEffect(() => {
     const fetchMentors = async () => {
@@ -457,9 +464,10 @@ export default function Mentors() {
                 id="session-start"
                 type="datetime-local"
                 value={slotStart}
-                min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-                  .toISOString()
-                  .slice(0, 16)}
+                // min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+                //   .toISOString()
+                //   .slice(0, 16)}
+                min={minSlotStart}
                 onChange={(event) => setSlotStart(event.target.value)}
                 required
               />

@@ -994,7 +994,8 @@ const verifyRazorpayPayment = async (req, res) => {
           bookingId: booking._id,
           paymentId: payment._id,
           status: {
-            $nin: ["REFUND_PENDING", "REFUNDED"],
+            // $nin: ["REFUND_PENDING", "REFUNDED"],
+             $in: ["CAPTURED_PENDING_BOOKING", "CONFIRMED"],
           },
         },
         {
@@ -1453,7 +1454,7 @@ const getAdminTransactions = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Unable to fetch admin transactions.",cd
+      message: "Unable to fetch admin transactions.",
     });
   }
 };

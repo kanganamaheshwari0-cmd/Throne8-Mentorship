@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-
+const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
 const Mentor = require("../models/Mentor");
 const Payment = require("../models/Payment");
@@ -358,7 +358,158 @@ const getMentorBookings = async (req, res) => {
 };
 
 // COMPLETE A MENTOR SESSION AND UPDATE FINANCIAL LEDGER
+// const completeMentorBooking = async (req, res) => {
+//   try {
+//     if (req.user.role !== "mentor") {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Only mentors can complete sessions",
+//       });
+//     }
+
+//     const { bookingId } = req.params;
+
+//     if (!/^[0-9a-fA-F]{24}$/.test(bookingId || "")) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid booking ID",
+//       });
+//     }
+
+//     const mentor = await Mentor.findOne({
+//       userId: req.user.id,
+//     }).select("_id");
+
+//     if (!mentor) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Mentor profile not found",
+//       });
+//     }
+
+//     const completedAt = new Date();
+
+//     // Only a confirmed booking belonging to this mentor can be completed.
+//     const booking = await Booking.findOne({
+//       _id: bookingId,
+//       mentorId: mentor._id,
+//       status: "CONFIRMED",
+//       slotEnd: { $lte: completedAt },
+//     }).select("_id");
+
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message:
+//           "Confirmed booking not found, or session has not ended yet",
+//       });
+//     }
+
+//     // 15 calendar days after completion.
+//     const payoutEligibleAt = new Date(completedAt);
+//     payoutEligibleAt.setUTCDate(payoutEligibleAt.getUTCDate() + 15);
+
+//     // Conditional update prevents two concurrent completion requests
+//     // from both completing the same booking.
+//     const completedBooking = await Booking.findOneAndUpdate(
+//       {
+//         _id: booking._id,
+//         mentorId: mentor._id,
+//         status: "CONFIRMED",
+//         slotEnd: { $lte: completedAt },
+//       },
+//       {
+//         $set: {
+//           status: "COMPLETED",
+//           completedAt,
+//           payoutEligibleAt,
+//         },
+//       },
+//       {
+//         new: true,
+//         runValidators: true,
+//       }
+//     );
+
+//     if (!completedBooking) {
+//       return res.status(409).json({
+//         success: false,
+//         message: "Booking status changed. Refresh bookings and try again.",
+//       });
+//     }
+
+//     // Update only the existing ledger belonging to this booking.
+//     // Never create a ledger here: payment capture must create it first.
+//     try {
+//       const ledgerUpdate = await FinancialLedger.updateOne(
+//         {
+//           bookingId: completedBooking._id,
+//           status: "CONFIRMED",
+//         },
+//         {
+//           $set: {
+//             completedAt: completedBooking.completedAt,
+//             payoutEligibleAt: completedBooking.payoutEligibleAt,
+//           },
+//         },
+//         {
+//           runValidators: true,
+//         }
+//       );
+
+//       if (ledgerUpdate.matchedCount === 0) {
+//         console.error(
+//           "Financial ledger missing or not confirmed for completed booking:",
+//           completedBooking._id.toString()
+//         );
+
+//         return res.status(200).json({
+//           success: true,
+//           ledgerUpdated: false,
+//           reconciliationRequired: true,
+//           message:
+//             "Session completed, but its financial ledger needs reconciliation.",
+//           booking: completedBooking,
+//         });
+//       }
+//     } catch (ledgerError) {
+//       // Booking has already been completed. Do not pretend the ledger
+//       // was updated or undo the booking status without a transaction.
+//       console.error(
+//         "Financial ledger completion update failed:",
+//         ledgerError
+//       );
+
+//       return res.status(200).json({
+//         success: true,
+//         ledgerUpdated: false,
+//         reconciliationRequired: true,
+//         message:
+//           "Session completed, but the financial ledger update failed and requires reconciliation.",
+//         booking: completedBooking,
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       ledgerUpdated: true,
+//       message: "Mentor session completed and financial ledger updated successfully",
+//       booking: completedBooking,
+//     });
+//   } catch (error) {
+//     console.error("Complete mentor booking error:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Unable to complete mentor session",
+//     });
+//   }
+// };
+
+
 const completeMentorBooking = async (req, res) => {
+  let session;
+
   try {
     if (req.user.role !== "mentor") {
       return res.status(403).json({
@@ -387,124 +538,100 @@ const completeMentorBooking = async (req, res) => {
       });
     }
 
-    const completedAt = new Date();
+    session = await mongoose.startSession();
+    let completedBooking = null;
 
-    // Only a confirmed booking belonging to this mentor can be completed.
-    const booking = await Booking.findOne({
-      _id: bookingId,
-      mentorId: mentor._id,
-      status: "CONFIRMED",
-      slotEnd: { $lte: completedAt },
-    }).select("_id");
+    await session.withTransaction(async () => {
+      const now = new Date();
 
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Confirmed booking not found, or session has not ended yet",
-      });
-    }
-
-    // 15 calendar days after completion.
-    const payoutEligibleAt = new Date(completedAt);
-    payoutEligibleAt.setUTCDate(payoutEligibleAt.getUTCDate() + 15);
-
-    // Conditional update prevents two concurrent completion requests
-    // from both completing the same booking.
-    const completedBooking = await Booking.findOneAndUpdate(
-      {
-        _id: booking._id,
+      const booking = await Booking.findOne({
+        _id: bookingId,
         mentorId: mentor._id,
         status: "CONFIRMED",
-        slotEnd: { $lte: completedAt },
-      },
-      {
-        $set: {
-          status: "COMPLETED",
-          completedAt,
-          payoutEligibleAt,
-        },
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
+        slotEnd: { $lte: now },
+      }).session(session);
 
-    if (!completedBooking) {
-      return res.status(409).json({
-        success: false,
-        message: "Booking status changed. Refresh bookings and try again.",
-      });
-    }
-
-    // Update only the existing ledger belonging to this booking.
-    // Never create a ledger here: payment capture must create it first.
-    try {
-      const ledgerUpdate = await FinancialLedger.updateOne(
-        {
-          bookingId: completedBooking._id,
-          status: "CONFIRMED",
-        },
-        {
-          $set: {
-            completedAt: completedBooking.completedAt,
-            payoutEligibleAt: completedBooking.payoutEligibleAt,
-          },
-        },
-        {
-          runValidators: true,
-        }
-      );
-
-      if (ledgerUpdate.matchedCount === 0) {
-        console.error(
-          "Financial ledger missing or not confirmed for completed booking:",
-          completedBooking._id.toString()
+      if (!booking) {
+        const error = new Error(
+          "Confirmed booking not found, session has not ended, or booking is already processed"
         );
-
-        return res.status(200).json({
-          success: true,
-          ledgerUpdated: false,
-          reconciliationRequired: true,
-          message:
-            "Session completed, but its financial ledger needs reconciliation.",
-          booking: completedBooking,
-        });
+        error.statusCode = 409;
+        throw error;
       }
-    } catch (ledgerError) {
-      // Booking has already been completed. Do not pretend the ledger
-      // was updated or undo the booking status without a transaction.
-      console.error(
-        "Financial ledger completion update failed:",
-        ledgerError
+
+      // A confirmed financial ledger must exist before completion.
+      const ledger = await FinancialLedger.findOne({
+        bookingId: booking._id,
+        status: "CONFIRMED",
+      }).session(session);
+
+      if (!ledger) {
+        const error = new Error(
+          "Confirmed financial ledger not found. Reconciliation is required before completion."
+        );
+        error.statusCode = 409;
+        error.reconciliationRequired = true;
+        throw error;
+      }
+
+      const completedAt = new Date();
+
+      // Exactly 15 calendar days after completion, calculated in UTC.
+      const payoutEligibleAt = new Date(completedAt);
+      payoutEligibleAt.setUTCDate(
+        payoutEligibleAt.getUTCDate() + 15
       );
 
-      return res.status(200).json({
-        success: true,
-        ledgerUpdated: false,
-        reconciliationRequired: true,
-        message:
-          "Session completed, but the financial ledger update failed and requires reconciliation.",
-        booking: completedBooking,
-      });
-    }
+      booking.status = "COMPLETED";
+      booking.completedAt = completedAt;
+      booking.payoutEligibleAt = payoutEligibleAt;
+
+      await booking.save({ session });
+
+      ledger.completedAt = completedAt;
+      ledger.payoutEligibleAt = payoutEligibleAt;
+
+      await ledger.save({ session });
+
+      completedBooking = booking;
+    });
 
     return res.status(200).json({
       success: true,
       ledgerUpdated: true,
-      message: "Mentor session completed and financial ledger updated successfully",
+      message:
+        "Mentor session completed and financial ledger updated successfully",
       booking: completedBooking,
     });
   } catch (error) {
+    if (error.reconciliationRequired) {
+      return res.status(409).json({
+        success: false,
+        reconciliationRequired: true,
+        message: error.message,
+      });
+    }
+
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
     console.error("Complete mentor booking error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Unable to complete mentor session",
     });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
   }
 };
+
 
 module.exports = {
   createBooking,
