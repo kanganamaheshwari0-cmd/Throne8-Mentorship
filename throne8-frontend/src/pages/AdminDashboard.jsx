@@ -428,6 +428,92 @@ const [auditPagination, setAuditPagination] = useState({
     }
   }, []);
 
+  
+const handleSubmitRefund = async (event) => {
+  event.preventDefault();
+
+  setRefundMessage("");
+  setRefundError("");
+
+  const selectedPayment = refundCandidates.find(
+    (payment) => payment._id === refundPaymentId
+  );
+
+  if (!selectedPayment) {
+    setRefundError("Please select a valid captured payment.");
+    return;
+  }
+
+  const reason = refundReason.trim();
+
+  if (reason.length < 3 || reason.length > 500) {
+    setRefundError("Reason must be between 3 and 500 characters.");
+    return;
+  }
+
+  if (
+    selectedPayment.status !== "CAPTURED" ||
+    !selectedPayment.gatewayPaymentId ||
+    !Number.isSafeInteger(selectedPayment.amountPaise) ||
+    selectedPayment.amountPaise < 1
+  ) {
+    setRefundError("Selected payment is not eligible for this refund request.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Request a FULL refund of ₹${(
+      selectedPayment.amountPaise / 100
+    ).toFixed(2)} through Razorpay Test Mode?`
+  );
+
+  if (!confirmed) return;
+
+  setRefundSubmitting(true);
+
+  // const requestKey = `refund-${selectedPayment._id}-${Date.now()}`;
+  const requestKey = `refund-${selectedPayment._id}`;
+
+  try {
+    const response = await api.post("/admin/refunds", {
+      paymentId: selectedPayment._id,
+      amountPaise: selectedPayment.amountPaise,
+      reason,
+      requestKey,
+    });
+
+    const result = response.data;
+
+    if (result?.reconciliationRequired || result?.success === false) {
+      setRefundMessage(
+        result.message ||
+          "Refund needs reconciliation. Do not submit another refund request."
+      );
+    } else {
+      setRefundMessage(
+        result.message ||
+          "Refund request submitted. Final status is awaiting confirmation."
+      );
+
+      setRefundReason("");
+      setRefundPaymentId("");
+    }
+
+    await fetchRefunds();
+    await fetchRefundCandidates();
+  } catch (error) {
+    setRefundError(
+      error.response?.data?.message ||
+        "Refund request failed or its result is uncertain. Check the refund records before trying again."
+    );
+
+    await fetchRefunds();
+  } finally {
+    setRefundSubmitting(false);
+  }
+};
+
+
     
  const fetchReconciliation = useCallback(async () => {
   try {
@@ -1454,7 +1540,10 @@ useEffect(() => {
               </div>
 
               {/* <div className="t8-transaction-filters"> */}
-              <div className="t8-transaction-filters t8-refund-form">
+              <form
+               className="t8-transaction-filters t8-refund-form"
+                onSubmit={handleSubmitRefund}
+              > 
                 <label htmlFor="refund-payment">Captured payment</label>
                 <select
                   id="refund-payment"
@@ -1474,7 +1563,7 @@ useEffect(() => {
                 <textarea
                   id="refund-reason"
                   value={refundReason}
-                  onChange={(event) => setRefundReason(event.target.value)}
+                  onChange={(event) => setRefundReason(event.target.value)} 
                   minLength={3}
                   maxLength={500}
                   placeholder="Enter the reason for this refund"
@@ -1495,8 +1584,20 @@ useEffect(() => {
                   </p>
                 )}
 
+                <button
+                  type="submit"
+                  className="t8-button"
+                  disabled={
+                    refundSubmitting ||
+                    !refundPaymentId ||
+                    refundReason.trim().length < 3
+                  }
+                >
+                  {refundSubmitting ? "Submitting..." : "Request Full Refund"}
+                </button>
 
-              </div>
+
+              </form>
 
               {refundError && (
                 <div className="t8-error" role="alert">
