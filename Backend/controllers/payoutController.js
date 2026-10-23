@@ -188,6 +188,7 @@ const validateBookingForPayout = async (booking) => {
 };
 
 // GET ALL PAYOUT RECORDS
+// GET ALL PAYOUT RECORDS
 const getAdminPayouts = async (req, res) => {
   try {
     const payouts = await Payout.find()
@@ -203,10 +204,25 @@ const getAdminPayouts = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    const failedPayouts = payouts.filter(
+      (payout) => payout.status === "FAILED"
+    );
+
+    const totalFailedAmountPaise = failedPayouts.reduce(
+      (total, payout) => total + Number(payout.amountPaise || 0),
+      0
+    );
+
     return res.status(200).json({
       success: true,
       totalPayouts: payouts.length,
       payouts,
+      failedPayouts,
+      failedPayoutSummary: {
+        count: failedPayouts.length,
+        totalAmountPaise: totalFailedAmountPaise,
+        currency: "INR",
+      },
     });
   } catch (error) {
     console.error("Get admin payouts error:", error);
@@ -222,6 +238,11 @@ const getAdminPayouts = async (req, res) => {
 const getAdminFinanceSummary = async (req, res) => {
   try {
     const now = new Date();
+
+    console.log(
+      "PAYOUT HOLDING PERIOD (MINUTES):",
+      require("../services/payoutEligibilityService").HOLDING_PERIOD_MINUTES
+    );
 
     const bookings = await Booking.find({
       status: "COMPLETED",
@@ -359,6 +380,7 @@ const generateEligiblePayouts = async (req, res) => {
     let created = 0;
     let skipped = 0;
     const results = [];
+    console.log("PAYOUT GENERATION STARTED");
 
     for (const ledger of ledgers) {
       const booking = ledger.bookingId;

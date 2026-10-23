@@ -407,6 +407,28 @@ const getMyMentorEarnings = async (req, res) => {
       });
     }
 
+    const completedSessionsList = validLedgers.map(
+  ({ booking, eligibleAt, mentorPaise }) => {
+    const bookingLedger = ledgers.find(
+      (item) =>
+        item.bookingId.toString() === booking._id.toString()
+    );
+
+    return {
+      bookingId: booking._id,
+      sessionDate: booking.completedAt,
+      completedAt: booking.completedAt,
+      payoutEligibleAt: eligibleAt,
+      sessionPricePaise: bookingLedger?.studentPaidPaise ?? 0,
+      platformCommissionPaise:
+        bookingLedger?.platformCommissionPaise ?? 0,
+      mentorEarningsPaise: mentorPaise,
+      payoutStatus:
+        eligibleAt > new Date() ? "PENDING" : "ELIGIBLE",
+    };
+  }
+);
+
     const now = new Date();
 
     let totalCompletedEarningsPaise = 0;
@@ -453,7 +475,7 @@ const getMyMentorEarnings = async (req, res) => {
       summary: {
         completedSessions,
         totalCompletedEarningsPaise,
-        pendingEarningsPaise,
+        pendingEarningsPaise, 
         eligibleUnpaidEarningsPaise,
         payoutPendingPaise: sumPayouts(["PENDING"]),
         payoutApprovedPaise: sumPayouts(["APPROVED"]),
@@ -462,6 +484,8 @@ const getMyMentorEarnings = async (req, res) => {
         payoutFailedPaise: sumPayouts(["FAILED"]),
         payoutCancelledPaise: sumPayouts(["CANCELLED"]),
       },
+
+       completedSessions: completedSessionsList,
       payoutHistory: payouts,
       note:
         "Earnings include validated captured payments and confirmed ledgers for completed sessions. Refund-affected or inconsistent records are excluded. Payout eligibility begins 15 UTC calendar days after completion. Existing payout records are not counted again as unpaid earnings.",

@@ -33,10 +33,7 @@ const isPayoutEligible = ({
   hasActiveDispute = false,
   refundPending = false,
 }) => {
-  const eligibleAt = calculateEligibilityDate(
-    sessionCompletedAt
-  );
-
+  const eligibleAt = calculateEligibilityDate(sessionCompletedAt);
   const currentTime = new Date(now);
 
   if (Number.isNaN(currentTime.getTime())) {

@@ -156,6 +156,8 @@ export default function AdminPayouts() {
         { method: "PATCH" }
       );
 
+      console.log("PAYOUT APPROVAL RESPONSE:", data);
+
       setMessage(data.message || "Payout approved successfully.");
 
       await loadPayouts();

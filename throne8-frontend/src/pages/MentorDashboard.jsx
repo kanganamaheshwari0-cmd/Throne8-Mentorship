@@ -79,6 +79,113 @@ const css = `
 .md-booking strong{display:block;margin-bottom:7px;font-size:14px}
 .md-booking small{color:#9aa7d0;line-height:1.8}
 .md-footer{padding:24px;text-align:center;border-top:1px solid #242a46;color:#777fa8;font-size:12px;line-height:1.8}
+/* Earnings ledger — refined table layout */
+.md-panel:has(.md-table) {
+  background: #14182f;
+  border: 1px solid #303957;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+  padding: 8px 20px 18px;
+  scrollbar-width: thin;
+  scrollbar-color: #454d75 #14182f;
+}
+
+.md-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 1050px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.md-table th {
+  padding: 17px 14px;
+  background: #1c2240;
+  color: #aeb9e8;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  border-bottom: 1px solid #3a4264;
+}
+
+.md-table td {
+  padding: 18px 14px;
+  color: #e6eaff;
+  border-bottom: 1px solid #292f4d;
+  white-space: nowrap;
+}
+
+.md-table tbody tr {
+  transition: background 0.18s ease;
+}
+
+.md-table tbody tr:hover {
+  background: #1c2240;
+}
+
+.md-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.md-table td strong {
+  color: #c3c0ff;
+  font-weight: 800;
+}
+
+.md-status {
+  padding: 6px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.45px;
+}
+
+.md-status.paid,
+.md-status.succeeded,
+.md-status.completed {
+  background: #12392f;
+  color: #63e6b4;
+  border-color: #22634f;
+}
+
+.md-status.eligible {
+  background: #142e53;
+  color: #79b8ff;
+  border-color: #294d7c;
+}
+
+.md-status.holding,
+.md-status.on_hold,
+.md-status.processing,
+.md-status.pending {
+  background: #403318;
+  color: #ffd16a;
+  border-color: #685124;
+}
+
+.md-status.refunded,
+.md-status.failed,
+.md-status.disputed,
+.md-status.review_required {
+  background: #46232e;
+  color: #ffabb7;
+  border-color: #713746;
+}
+
+.md-footnote {
+  padding: 17px 24px 22px;
+  border-top: 1px solid #292f4d;
+  color: #9eacd5;
+  font-size: 12px;
+  line-height: 1.8;
+}
 @media(max-width:1100px){.md-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.md-content{padding:28px 22px}}
 @media(max-width:700px){.md-header{padding:13px 16px}.md-brand{font-size:20px}.md-role a{padding:9px;font-size:12px}.md-shell{grid-template-columns:1fr}.md-sidebar{border-right:0;border-bottom:1px solid #303654;padding:12px;display:flex;gap:7px;overflow-x:auto}.md-side-title,.md-side-bottom{display:none}.md-side-link{white-space:nowrap;width:auto;flex-shrink:0;margin:0;padding:12px;font-size:12px}.md-content{padding:24px 14px}.md-heading h1{font-size:25px}.md-cards{gap:9px}.md-card{padding:15px 12px}.md-card-value{font-size:22px}.md-card-note{font-size:11px}.md-panel-body{padding:17px}}
 `;
@@ -198,7 +305,14 @@ export default function MentorDashboard() {
       const data = response?.data;
       const payload = data?.earnings ?? data?.data ?? data ?? null;
       setEarnings(payload);
+      console.log("EARNINGS DEBUG FULL RESPONSE:", JSON.stringify(data, null, 2));
 
+//       console.log("EARNINGS DEBUG", {
+//   response: data,
+//   completedSessions: payload?.completedSessions,
+// });
+
+     console.log("EARNINGS API RESPONSE:", data);
       const payoutList = [
         data?.payouts, data?.payoutHistory, data?.history,
         payload?.payouts, payload?.payoutHistory, payload?.history,
@@ -241,15 +355,30 @@ export default function MentorDashboard() {
   const onHold = rupees(amountPaise(summary,
     "onHoldEarningsPaise", "disputedEarningsPaise"));
 
-  const ledger = useMemo(() => {
-    for (const value of [
-      earnings?.ledger, earnings?.records, earnings?.items, earnings?.entries,
-      earnings?.ledgers, earnings?.summary?.ledger, earnings?.summary?.records,
-    ]) {
-      if (Array.isArray(value)) return value;
-    }
-    return [];
-  }, [earnings]);
+  // const ledger = useMemo(() => {
+  //   for (const value of [
+  //     earnings?.ledger, earnings?.records, earnings?.items, earnings?.entries,
+  //     earnings?.ledgers, earnings?.summary?.ledger, earnings?.summary?.records,
+  //   ]) {
+  //     if (Array.isArray(value)) return value;
+  //   }
+  //   return [];
+  // }, [earnings]);
+
+ const ledger = useMemo(() => {
+  const candidates = [
+    earnings?.completedSessions,
+    earnings?.ledger,
+    earnings?.records,
+    earnings?.items,
+    earnings?.entries,
+    earnings?.ledgers,
+    earnings?.summary?.ledger,
+    earnings?.summary?.records,
+  ];
+
+  return candidates.find(Array.isArray) || [];
+}, [earnings]);
 
   const allocation = [
     { label: "Pending session", amount: pending, color: "#9ca3c7" },
@@ -268,6 +397,8 @@ export default function MentorDashboard() {
   const nextPayoutAmount = rupees(amountPaise(summary,
     "nextPayoutAmountPaise") || amountPaise(summary.nextPayout, "amountPaise"));
 
+
+    
   const statements = useMemo(() => {
     const groups = new Map();
 
@@ -545,21 +676,43 @@ export default function MentorDashboard() {
                               ? record.bookingId : {};
                           const id = booking?._id || booking?.id ||
                             (typeof record?.bookingId === "string" ? record.bookingId : "—");
-                          const status = statusOf(record);
-                          const fee = rupees(feeOf(record));
-                          const commission = rupees(commissionOf(record));
-                          const net = rupees(netOf(record));
+                          // const status = statusOf(record);
+                          // const fee = rupees(feeOf(record));
+                          // const commission = rupees(commissionOf(record));
+                          // const net = rupees(netOf(record));
+                          const status = record?.payoutStatus || statusOf(record);
+
+                            const fee = rupees(
+                              record?.sessionPricePaise ??
+                              feeOf(record)
+                            );
+                            
+                            const commission = rupees(
+                              record?.platformCommissionPaise ??
+                              record?.commissionPaise ??
+                              commissionOf(record)
+                            );
+                            
+                            const net = rupees(
+                              record?.mentorEarningsPaise ??
+                              record?.mentorGrossPaise ??
+                              netOf(record)
+                            );
 
                           return (
                             <tr key={record?._id || id || index}>
                               <td>{String(id)}</td>
                               <td>{record?.studentName || booking?.studentName || studentNameOf(record)}</td>
                               <td>{dateText(record?.sessionDate || record?.completedAt || booking?.slotStart)}</td>
-                              <td>{dateText(payableAtOf(record))}</td>
+                              <td>{dateText(record?.payoutEligibleAt || payableAtOf(record))}</td>
                               <td>{money(fee)}</td>
                               <td>{money(commission)}</td>
                               <td><strong>{money(net)}</strong></td>
-                              <td><span className={`md-status ${status.replaceAll(" ", "_")}`}>{status.replaceAll("_", " ")}</span></td>
+                              <td>
+                               <span className={`md-status ${String(status).replaceAll(" ", "_")}`}>
+                                 {String(status).replaceAll("_", " ")}
+                               </span>
+                             </td>
                             </tr>
                           );
                         })}

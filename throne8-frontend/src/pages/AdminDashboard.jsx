@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 
+
 const financeMenu = [
   { label: "Finance summary", icon: "▦", section: "overview" },
   { label: "Transactions", icon: "↔", section: "transactions" },
@@ -14,6 +15,7 @@ const financeMenu = [
   { label: "Reconciliation", icon: "⇄", section: "reconciliation" },
   { label: "Audit log", icon: "≡", section: "audit" },
 ];
+
 
 const formatNumber = (value) =>
   Number(value || 0).toLocaleString("en-IN");
@@ -83,6 +85,15 @@ const [auditPagination, setAuditPagination] = useState({
       setFailedPayoutError("");
 
       const response = await api.get("/admin/payouts");
+    //   console.log("Payout API response:", response.data);
+    //   console.log(
+    //  "Failed payout records:",
+    //  response.data.payouts?.filter((payout) => payout.status === "FAILED")
+    // );
+    console.log(
+  "Payout API response:",
+  JSON.stringify(response.data, null, 2)
+);
       const records = Array.isArray(response.data.payouts)
         ? response.data.payouts
         : [];
@@ -592,7 +603,7 @@ useEffect(() => {
     {
       title: "Total Bookings",
       value: stats?.totalBookings,
-      icon: "▤",
+      icon: "▣",
       color: "purple",
       description: "All platform bookings",
     },
@@ -769,6 +780,93 @@ useEffect(() => {
         .t8-transaction-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:18px}
         .t8-commission-search{width:100%;max-width:420px;padding:12px;margin-bottom:18px;border:1px solid var(--border);border-radius:9px;background:#10142b;color:var(--text);font:inherit}
         .t8-commission-rate{width:105px;padding:9px;border:1px solid var(--border);border-radius:8px;background:#10142b;color:var(--text)}
+        /* Disputes & Refunds page polish */
+.t8-notice {
+  padding: 16px 18px;
+  border-left: 4px solid #f4bd4e;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  background: #28243a;
+  color: #e8dcff;
+  line-height: 1.7;
+}
+
+.t8-transaction-empty {
+  padding: 38px 20px;
+  margin-top: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #12162c;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.8;
+}
+
+.t8-transaction-empty strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.t8-transaction-filters textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #10142b;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.t8-transaction-filters label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.t8-transaction-filters textarea:focus {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
+}
+
+/* Refund form layout */
+.t8-refund-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 18px;
+  align-items: center;
+}
+
+.t8-refund-form label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.t8-refund-form select,
+.t8-refund-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.t8-refund-form textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.t8-refund-form button {
+  justify-self: start;
+}
+
+@media (max-width: 700px) {
+  .t8-refund-form {
+    grid-template-columns: 1fr;
+  }
+}
         @media(max-width:1200px){.t8-stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.t8-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:1000px){.t8-transaction-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.t8-transaction-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
         @media(max-width:850px){.t8-layout{grid-template-columns:1fr}.t8-sidebar{padding:12px;border-right:0;border-bottom:1px solid var(--border)}.t8-sidebar-label,.t8-sidebar-divider,.t8-sidebar-bottom{display:none}.t8-menu{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px}.t8-menu-item{width:auto;flex:0 0 auto;white-space:nowrap;padding:11px 13px}.t8-main{padding:23px 18px}.t8-topbar{padding:12px 16px}}
@@ -817,7 +915,7 @@ useEffect(() => {
           <div className="t8-sidebar-bottom">
             <button type="button" onClick={() => navigate("/admin/mentors")}>♙ &nbsp; Mentor management</button>
             <button type="button" onClick={() => navigate("/admin/payouts")}>₹ &nbsp; Mentor payouts</button>
-            <button type="button" onClick={() => navigate("/")}>↖ &nbsp; Back to website</button>
+            <button type="button" onClick={() => navigate("/")}>← &nbsp; Back to website</button>
             <button type="button" onClick={handleLogout}>⇥ &nbsp; Logout</button>
           </div>
         </aside>
@@ -948,7 +1046,7 @@ useEffect(() => {
                   <button type="button" className="t8-button primary" onClick={() => navigate("/admin/payouts")}>Open payouts →</button>
                 </article>
                 <article className="t8-action-card">
-                  <span className="t8-action-icon">▤</span>
+                  <span className="t8-action-icon">▣</span>
                   <h3>Booking Activity</h3>
                   <p>Review booking totals and session completion statistics reported by your API.</p>
                   <div style={{ color: "#aab8e7", fontSize: 13 }}>Total bookings: {formatNumber(stats?.totalBookings)}</div>
@@ -1037,7 +1135,7 @@ useEffect(() => {
                 <div className="t8-transaction-pagination">
                   <span className="t8-transaction-secondary">Page {transactionPagination.page || 1} of {transactionPagination.totalPages || 1}</span>
                   <div className="t8-heading-actions">
-                    <button type="button" className="t8-button" disabled={transactionLoading || transactionPage <= 1} onClick={() => setTransactionPage((page) => Math.max(1, page - 1))}>← Previous</button>
+                    <button type="button" className="t8-button" disabled={transactionLoading || transactionPage <= 1} onClick={() => setTransactionPage((page) => Math.max(1, page - 1))}>â† Previous</button>
                     <button type="button" className="t8-button" disabled={transactionLoading || transactionPage >= (transactionPagination.totalPages || 1)} onClick={() => setTransactionPage((page) => page + 1)}>Next →</button>
                   </div>
                 </div>
@@ -1155,7 +1253,7 @@ useEffect(() => {
                 <div className="t8-transaction-pagination">
                   <span className="t8-transaction-secondary">Page {commissionRecordsPagination.page || 1} of {commissionRecordsPagination.totalPages || 1}</span>
                   <div className="t8-heading-actions">
-                    <button type="button" className="t8-button" disabled={commissionLoading || commissionRecordsPage <= 1} onClick={() => setCommissionRecordsPage((page) => Math.max(1, page - 1))}>← Previous</button>
+                    <button type="button" className="t8-button" disabled={commissionLoading || commissionRecordsPage <= 1} onClick={() => setCommissionRecordsPage((page) => Math.max(1, page - 1))}>â† Previous</button>
                     <button type="button" className="t8-button" disabled={commissionLoading || commissionRecordsPage >= (commissionRecordsPagination.totalPages || 1)} onClick={() => setCommissionRecordsPage((page) => page + 1)}>Next →</button>
                   </div>
                 </div>
@@ -1270,6 +1368,69 @@ useEffect(() => {
 
           {activeSection === "refunds" && (
             <section className="t8-panel">
+                            <div className="t8-page-heading">
+                <div>
+                  <h2>Disputes & Refunds Overview</h2>
+                  <p>
+                    Monitor refund activity and review records returned by the
+                    finance API.
+                  </p>
+                </div>
+                <span className="t8-payment-status pending">
+                  {refunds.length} Refund Records
+                </span>
+              </div>
+
+              <div className="t8-stats-grid">
+                <div className="t8-stat-card">
+                  <span>Total Refund Records</span>
+                  <strong>{refunds.length}</strong>
+                  <small>Records received from API</small>
+                </div>
+
+                <div className="t8-stat-card">
+                  <span>Pending / Processing</span>
+                  <strong>
+                    {
+                      refunds.filter((refund) =>
+                        ["PENDING", "REQUESTED", "PROCESSING",
+                         "RECONCILIATION_REQUIRED"].includes(
+                          String(refund.status || "").toUpperCase()
+                        )
+                      ).length
+                    }
+                  </strong>
+                  <small>Require status monitoring</small>
+                </div>
+
+                <div className="t8-stat-card">
+                  <span>Completed Refunds</span>
+                  <strong>
+                    {
+                      refunds.filter((refund) =>
+                        ["PROCESSED", "COMPLETED", "SUCCESS", "REFUNDED"].includes(
+                          String(refund.status || "").toUpperCase()
+                        )
+                      ).length
+                    }
+                  </strong>
+                  <small>Marked successful by API</small>
+                </div>
+
+                <div className="t8-stat-card">
+                  <span>Failed Refunds</span>
+                  <strong>
+                    {
+                      refunds.filter((refund) =>
+                        ["FAILED", "REJECTED"].includes(
+                          String(refund.status || "").toUpperCase()
+                        )
+                      ).length
+                    }
+                  </strong>
+                  <small>Need review</small>
+                </div>
+              </div>
               <div className="t8-page-heading">
                 <div>
                   <h2>Refund Records</h2>
@@ -1292,7 +1453,8 @@ useEffect(() => {
                 the captured payment. Submitting sends a request to Razorpay.
               </div>
 
-              <div className="t8-transaction-filters">
+              {/* <div className="t8-transaction-filters"> */}
+              <div className="t8-transaction-filters t8-refund-form">
                 <label htmlFor="refund-payment">Captured payment</label>
                 <select
                   id="refund-payment"
@@ -1596,56 +1758,6 @@ useEffect(() => {
                      : ""}
                  </div>
                  
-                 {reconciliation.pagination && (
-                   <div
-                     style={{
-                       display: "flex",
-                       justifyContent: "flex-end",
-                       alignItems: "center",
-                       gap: 10,
-                       marginTop: 14,
-                     }}
-                   >
-                     <button
-                       type="button"
-                       className="t8-btn-secondary"
-                       disabled={
-                         reconciliationLoading ||
-                         reconciliationPage <= 1
-                       }
-                       onClick={() =>
-                         setReconciliationPage((page) => Math.max(1, page - 1))
-                       }
-                     >
-                       Previous
-                     </button>
-                 
-                     <span className="t8-transaction-secondary">
-                       Page {reconciliation.pagination.page || 1} of{" "}
-                       {Math.max(1, reconciliation.pagination.totalPages || 1)}
-                     </span>
-                 
-                     <button
-                       type="button"
-                       className="t8-btn-secondary"
-                       disabled={
-                         reconciliationLoading ||
-                         reconciliationPage >=
-                           (reconciliation.pagination.totalPages || 1)
-                       }
-                       onClick={() =>
-                         setReconciliationPage((page) =>
-                           Math.min(
-                             reconciliation.pagination.totalPages || 1,
-                             page + 1
-                           )
-                         )
-                       }
-                     >
-                       Next
-                     </button>
-                   </div>
-                 )}
                   </>
                 ) : !reconciliationLoading && !reconciliationError ? (
                   <div className="t8-transaction-empty">Reconciliation report is not available yet.</div>
@@ -1828,15 +1940,6 @@ useEffect(() => {
       </div>
     )}
 
-    {reconciliation.pagination && (
-  <p className="t8-transaction-secondary">
-    Showing page {reconciliation.pagination.page} of{" "}
-    {Math.max(1, reconciliation.pagination.totalPages)} ·
-    {" "}{reconciliation.results?.length || 0} records on this page
-    {" "}· {reconciliation.pagination.total} total records
-  </p>
-)}
-
     <div className="t8-transaction-summary">
       <div className="t8-summary-card">
         <span>Failed payout records</span>
@@ -1907,127 +2010,6 @@ useEffect(() => {
   </section>
 )}
 
-          {activeSection !== "overview" &&
-          activeSection !== "failed" &&
-            activeSection !== "transactions" &&
-            activeSection !== "commission" &&
-            activeSection !== "earnings" &&
-            activeSection !== "refunds" &&
-            activeSection !== "reconciliation" &&
-            activeSection !== "audit" && (
-              
-<section className="t8-panel">
-  <div className="t8-section-heading">
-    <div>
-      <h2>Failed payouts</h2>
-      <p>
-        Review failed payout records and inspect their details.
-        No payout transfers are initiated from this page.
-      </p>
-    </div>
-
-    <button
-      type="button"
-      className="t8-button primary"
-      onClick={fetchFailedPayouts}
-      disabled={failedPayoutLoading}
-    >
-      {failedPayoutLoading ? "Refreshing..." : "↻ Refresh"}
-    </button>
-  </div>
-
-  {failedPayoutError && (
-    <div className="t8-error" role="alert">
-      {failedPayoutError}
-    </div>
-  )}
-
-  {failedPayoutLoading ? (
-    <p>Loading failed payout records...</p>
-  ) : failedPayoutError ? (
-    <p>Failed payout records could not be loaded. Try refreshing.</p>
-  ) : failedPayouts.length === 0 ? (
-    <div className="t8-empty-state">
-      <h3>No failed payouts found</h3>
-      <p>
-        The connected API returned no payouts with FAILED status.
-        This does not create or change any payout records.
-      </p>
-      <button
-        type="button"
-        className="t8-button secondary"
-        onClick={() => navigate("/admin/payouts")}
-      >
-        Open Mentor Payouts →
-      </button>
-    </div>
-  ) : (
-    <div className="t8-table-wrap">
-      <table className="t8-table">
-        <thead>
-          <tr>
-            <th>Payout ID</th>
-            <th>Mentor</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Failure details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {failedPayouts.map((payout) => (
-            <tr key={payout._id || payout.id}>
-              <td>
-                <span className="t8-transaction-id">
-                  {payout._id || payout.id || "—"}
-                </span>
-              </td>
-              <td>
-                {payout.mentor?.name ||
-                  payout.mentorName ||
-                  payout.mentorId?.name ||
-                  "—"}
-              </td>
-              <td>
-                {Number.isFinite(Number(payout.amountPaise))
-                  ? `₹${(Number(payout.amountPaise) / 100).toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
-                  : Number.isFinite(Number(payout.amount))
-                    ? `₹${Number(payout.amount).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}`
-                    : "—"}
-              </td>
-              <td>
-                <span className="t8-payment-status failed">
-                  {payout.status || "FAILED"}
-                </span>
-              </td>
-              <td>
-                {payout.createdAt
-                  ? new Date(payout.createdAt).toLocaleString("en-IN")
-                  : "—"}
-              </td>
-              <td>
-                {payout.failureReason ||
-                  payout.failureMessage ||
-                  payout.errorMessage ||
-                  payout.notes ||
-                  "No failure details recorded"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )}
-</section>
-
-            )}
-
           <footer className="t8-footer">
             <strong>THRONE8</strong> · Mentorship Admin Portal
             <br />
@@ -2041,3 +2023,4 @@ useEffect(() => {
 }
 
 export default AdminDashboard;
+
