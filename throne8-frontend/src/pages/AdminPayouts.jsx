@@ -57,7 +57,6 @@ export default function AdminPayouts() {
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-
   const token = localStorage.getItem("throne8_token");
 
   // const request = async (path, options = {}) => {

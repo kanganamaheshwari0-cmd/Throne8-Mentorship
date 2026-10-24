@@ -5,9 +5,9 @@ import { useAuth } from "../context/AuthContext";
 import "./Login.css";
 
 function Login() {
+
   const { login } = useAuth();
   const navigate = useNavigate();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
