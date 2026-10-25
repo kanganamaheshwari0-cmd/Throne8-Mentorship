@@ -196,10 +196,12 @@ const listFrom = (response) => {
   for (const key of ["bookings", "payouts", "payoutHistory", "history", "ledger", "records", "items", "entries"]) {
     if (Array.isArray(data?.[key])) return data[key];
   }
+  
   return [];
 };
 
 const statusOf = (item) =>
+
   String(item?.status || item?.bookingStatus || item?.paymentStatus || "pending").toLowerCase();
 
 const rupees = (paise) => Number(paise || 0) / 100;

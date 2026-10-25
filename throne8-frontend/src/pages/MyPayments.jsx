@@ -296,6 +296,7 @@ export default function MyPayments() {
                     </tr>
                   </thead>
                   <tbody>
+                    
                     {payments.map((payment, index) => (
                       <tr key={payment._id || payment.id || index}>
                         <td>{formatDate(

@@ -38,6 +38,7 @@ function AdminMentors() {
           const currentRate = Number(
             mentor.commissionRateBps ?? 2000
           );
+          
 
           next[mentor._id] =
             previous[mentor._id] !== undefined &&
