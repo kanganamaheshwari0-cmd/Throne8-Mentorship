@@ -402,13 +402,34 @@ const [auditPagination, setAuditPagination] = useState({
         ? response.data.transactions
         : [];
 
-      const eligiblePayments = payments.filter(
-        (payment) =>
-          payment.status === "CAPTURED" &&
-          payment.gatewayPaymentId &&
-          Number(payment.amountPaise) > 0 &&
-          Number(payment.refundedAmountPaise || 0) === 0
+    
+        const existingRefundPaymentIds = new Set(
+  refunds
+    .filter(
+      (refund) =>
+        !["FAILED", "REJECTED", "CANCELLED"].includes(
+          String(refund.status || "").toUpperCase()
+        )
+    )
+    .map((refund) => {
+      const payment = refund.paymentId;
+
+      return String(
+        payment && typeof payment === "object"
+          ? payment._id
+          : payment || ""
       );
+    })
+);
+
+const eligiblePayments = payments.filter(
+  (payment) =>
+    payment.status === "CAPTURED" &&
+    payment.gatewayPaymentId &&
+    Number(payment.amountPaise) > 0 &&
+    Number(payment.refundedAmountPaise || 0) === 0 &&
+    !existingRefundPaymentIds.has(String(payment._id))
+);
 
       setRefundCandidates(eligiblePayments);
 
@@ -426,8 +447,7 @@ const [auditPagination, setAuditPagination] = useState({
           "Unable to load captured payments."
       );
     }
-  }, []);
-
+    }, [refunds]);
   
 const handleSubmitRefund = async (event) => {
   event.preventDefault();
