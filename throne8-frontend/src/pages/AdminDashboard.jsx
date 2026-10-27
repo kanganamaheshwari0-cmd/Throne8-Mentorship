@@ -434,6 +434,7 @@ const eligiblePayments = payments.filter(
       setRefundCandidates(eligiblePayments);
 
       if (eligiblePayments.length === 0) {
+        
         setRefundMessage("No eligible captured payments found.");
       } else {
         setRefundMessage(
